@@ -4,8 +4,7 @@ import { Resend } from "resend";
  * Built lazily, not at import time: `dotenvFlow.config()` runs in `index.ts`'s
  * body, after the whole import graph is evaluated (§15 of the code context),
  * so a module-scope `new Resend(process.env.RESEND_API_KEY)` would freeze in
- * the pre-override environment the same way the billing/render clients do —
- * which is why those are lazy too (`dodo.ts`, `render-client.ts`).
+ * the pre-override environment.
  */
 let client: Resend | null | undefined;
 

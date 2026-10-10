@@ -16,11 +16,9 @@ import { prisma } from "../utils/db";
  * the frontend guard keeps sending the user back to /onboarding until it has
  * been made.
  *
- * **Idempotent.** The paid path can call this and then leave for Dodo's
- * hosted checkout, returning through /billing/return — and a user can reach
- * this endpoint again afterwards. Re-stamping would move the date each time
- * and quietly turn "when did they onboard" into "when were they last here", so
- * a repeat call leaves the original timestamp alone.
+ * **Idempotent.** Re-stamping would move the date each time and quietly turn
+ * "when did they onboard" into "when were they last here", so a repeat call
+ * leaves the original timestamp alone.
  */
 const completeOnboarding = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -35,11 +33,6 @@ const completeOnboarding = async (req: Request, res: Response): Promise<void> =>
     }
 
     // Already finished: answer before the gate below, never after.
-    //
-    // The paid path calls this, leaves for the hosted checkout, and can call it
-    // again on the way back through /billing/return. Running a repeat call into
-    // a gate could refuse someone who is mid-checkout and already holds a live
-    // subscription — the exact trap the write-once note above exists to avoid.
     if (existing.onboardedAt) {
       const user = await prisma.user.findUnique({
         where: { id: req.user.id },
@@ -78,27 +71,6 @@ const completeOnboarding = async (req: Request, res: Response): Promise<void> =>
   }
 };
 
-/**
- * The subscription that decides a user's plan — prefer one that is actually
- * active, fall back to the newest row otherwise. Duplicated in miniature from
- * `billingController.ts`'s `currentSubscription`, which does the same query;
- * kept as a one-off here rather than shared, since this is the only other
- * caller.
- */
-const currentSubscription = async (userId: string) => {
-  const subscriptions = await prisma.subscription.findMany({
-    where: { userId },
-    orderBy: { createdAt: "desc" },
-  });
-  return subscriptions.find(s => s.status === "active") ?? subscriptions[0] ?? null;
-};
-
-/** A subscription still auto-renewing — the thing deletion must not orphan mid-cycle. */
-const hasRenewingSubscription = async (userId: string): Promise<boolean> => {
-  const subscription = await currentSubscription(userId);
-  return subscription?.status === "active" && !subscription.cancelAtPeriodEnd;
-};
-
 const auditLog = (userId: string, email: string, action: string, detail?: string) =>
   prisma.accountAuditLog.create({ data: { userId, email, action, detail } });
 
@@ -132,18 +104,6 @@ const deleteAccount = async (req: Request, res: Response): Promise<void> => {
     }
     if (existing.deletedAt) {
       res.status(200).json({ success: true, data: { deletedAt: existing.deletedAt } });
-      return;
-    }
-
-    // A subscription still billing must be cancelled first — soft-deleting an
-    // account is not a way to stop future charges, and a 30-day grace period
-    // makes "cancel it for me" an easy, silent thing to get wrong.
-    if (await hasRenewingSubscription(userId)) {
-      res.status(409).json({
-        success: false,
-        code: "ACTIVE_SUBSCRIPTION",
-        message: "Cancel your subscription first, then delete your account.",
-      });
       return;
     }
 

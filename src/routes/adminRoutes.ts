@@ -1,7 +1,6 @@
 import express from "express";
 import { adminController } from "../controllers/adminController";
 import { adminUsersController } from "../controllers/adminUsersController";
-import { adminPlansController } from "../controllers/adminPlansController";
 import { adminInvitesController } from "../controllers/adminInvitesController";
 import { adminSampleDataController } from "../controllers/adminSampleDataController";
 import { protect, requireAdmin } from "../middlewares/authMiddleware";
@@ -46,7 +45,7 @@ adminRouter.get("/me", getMe);
  * @openapi
  * tags:
  *   name: Admin Users
- *   description: Read-only user list and detail — accounts, status, plan and activity history
+ *   description: Read-only user list and detail — accounts, status and activity history
  */
 const { listAll: listUsers, getOne: getUser } = adminUsersController;
 
@@ -75,7 +74,7 @@ const { listAll: listUsers, getOne: getUser } = adminUsersController;
  *         schema: { type: integer, default: 20 }
  *     responses:
  *       200:
- *         description: A page of users, each with its resolved plan
+ *         description: A page of users
  */
 adminRouter.get("/users", listUsers);
 
@@ -83,7 +82,7 @@ adminRouter.get("/users", listUsers);
  * @openapi
  * /admin/users/{id}:
  *   get:
- *     summary: One user's profile, plan, and account activity history
+ *     summary: One user's profile and account activity history
  *     tags: [Admin Users]
  *     parameters:
  *       - in: path
@@ -97,32 +96,6 @@ adminRouter.get("/users", listUsers);
  *         description: Unknown user id (`UNKNOWN_USER`)
  */
 adminRouter.get("/users/:id", getUser);
-
-/**
- * @openapi
- * tags:
- *   name: Admin Plans
- *   description: Read-only view of the plan table — pricing and Dodo product wiring
- */
-const { listAll: listPlans } = adminPlansController;
-
-/**
- * @openapi
- * /admin/plans:
- *   get:
- *     summary: Every plan, including free, with its resolved Dodo product ids
- *     description: >
- *       Plans are code-defined constants (src/lib/billing/plans.ts), not
- *       database rows — there is no edit endpoint. Product ids are resolved
- *       from the environment at request time, exactly as checkout resolves
- *       them, so a plan whose env var is unset in this deployment reports
- *       `productId: null` rather than a 500.
- *     tags: [Admin Plans]
- *     responses:
- *       200:
- *         description: All plans, free first
- */
-adminRouter.get("/plans", listPlans);
 
 /**
  * @openapi

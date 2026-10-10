@@ -10,7 +10,6 @@ import { isAllowedOrigin } from "./lib/origins";
 import { createServer } from "http";
 import { prisma } from "./utils/db";
 import { errorHandler } from "./middlewares/errorHandler";
-import { handleDodoWebhook } from "./controllers/dodoWebhookController";
 import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./utils/swagger";
 
@@ -45,16 +44,6 @@ app.use(
 );
 
 app.use(cookieParser());
-
-// Mounted ahead of express.json() on purpose. Dodo signs the exact bytes it sends,
-// so this handler needs the untouched body; once express.json() has parsed a
-// request, the original bytes are gone. body-parser marks the request as already
-// read, so the JSON parser below leaves this route alone.
-app.post(
-  "/api/webhooks/dodo",
-  express.raw({ type: "application/json" }),
-  handleDodoWebhook
-);
 
 app.use(express.json());
 

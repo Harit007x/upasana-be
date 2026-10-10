@@ -7,7 +7,8 @@
  * The sheet gives each place's number of rooms and the most people it takes,
  * not the rooms themselves. So the rooms here are made up to match those
  * totals — numbered 1 to N, beds spread as evenly as they go, about 40% family
- * rooms and the rest split between gents and ladies, none marked ground floor.
+ * rooms and the rest split between gents and ladies, all on the 1st floor until
+ * someone says which are on the ground floor.
  * Admins correct them from the place's Edit screen once the guest houses send
  * their real room lists.
  */
@@ -36,7 +37,7 @@ function rooms(count: number, beds: number) {
     label: String(index + 1),
     beds: base + (index < bigger ? 1 : 0),
     kind: kind(index),
-    groundFloor: false,
+    floor: 1,
   }));
 }
 

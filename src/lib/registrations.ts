@@ -41,26 +41,32 @@ const optionalText = (max: number) =>
   text(max)
     .optional()
     .nullable()
-    .transform((v) => (v ? v : null));
+    .transform(v => (v ? v : null));
 
 const member = z.object({
   /** The person's id from an earlier save, when editing; empty for someone new. */
   id: z.string().max(40).optional(),
   fullName: text(120).min(2, "Enter the full name"),
   gender: z.enum(GENDERS, { error: "Select a gender" }),
-  age: z.number({ error: "Enter the age" }).int().min(1, "Age must be 1 to 100").max(100, "Age must be 1 to 100"),
+  age: z
+    .number({ error: "Enter the age" })
+    .int()
+    .min(1, "Age must be 1 to 100")
+    .max(100, "Age must be 1 to 100"),
   mobile: z
     .string()
     .regex(MOBILE_E164, "Enter a valid mobile number with country code")
     .optional()
     .nullable()
-    .transform((v) => v ?? null),
+    .transform(v => v ?? null),
   relation: optionalText(40),
   isPrimary: z.boolean(),
   needsAssistance: z.boolean(),
   assistanceNote: optionalText(300),
   arrival: stayPoint,
   departure: stayPoint,
+  /** Asks for a bed for this person. Absent: as `accommodationRequired` says for everyone. */
+  needsAccommodation: z.boolean().optional(),
 });
 
 export const newRegistrationSchema = z
@@ -75,12 +81,26 @@ export const newRegistrationSchema = z
     departure: stayPoint,
     travel: z.object({
       mode: z.enum(TRAVEL_MODES, { error: "Select how you are travelling" }),
-      vehicleCount: z.number().int().min(1).max(MAX_VEHICLES.family).optional().nullable().transform((v) => v ?? null),
+      vehicleCount: z
+        .number()
+        .int()
+        .min(1)
+        .max(MAX_VEHICLES.family)
+        .optional()
+        .nullable()
+        .transform(v => v ?? null),
       // Optional, one per vehicle. Blank entries are dropped in toCreateData.
-      vehicleNumbers: z.array(text(20)).max(MAX_VEHICLES.family).optional().transform((v) => v ?? []),
+      vehicleNumbers: z
+        .array(text(20))
+        .max(MAX_VEHICLES.family)
+        .optional()
+        .transform(v => v ?? []),
       reference: optionalText(80),
       needsPickup: z.boolean(),
-      needsDrop: z.boolean().optional().transform((v) => v ?? false),
+      needsDrop: z
+        .boolean()
+        .optional()
+        .transform(v => v ?? false),
     }),
     accommodationRequired: z.boolean(),
     notes: optionalText(1000),
@@ -137,7 +157,10 @@ export const newRegistrationSchema = z
     });
     // A family is looked after by an adult; someone registering alone may be younger.
     if (value.type === "family" && (value.members[0]?.age ?? 0) < MIN_FAMILY_CONTACT_AGE) {
-      issue(["members", 0, "age"], `A family's primary contact has to be ${MIN_FAMILY_CONTACT_AGE} or older`);
+      issue(
+        ["members", 0, "age"],
+        `A family's primary contact has to be ${MIN_FAMILY_CONTACT_AGE} or older`
+      );
     }
     if (value.travel.mode === "personal_vehicle") {
       const max = maxVehiclesFor(value.type, value.members.length);
@@ -152,8 +175,10 @@ export const newRegistrationSchema = z
       const seenPlates = new Set<string>();
       value.travel.vehicleNumbers.forEach((plate, index) => {
         if (!plate) return;
-        if (!isVehiclePlate(plate)) issue(["travel", "vehicleNumbers", index], "Not a valid vehicle number");
-        if (seenPlates.has(normalizePlate(plate))) issue(["travel", "vehicleNumbers", index], "The same vehicle is listed twice");
+        if (!isVehiclePlate(plate))
+          issue(["travel", "vehicleNumbers", index], "Not a valid vehicle number");
+        if (seenPlates.has(normalizePlate(plate)))
+          issue(["travel", "vehicleNumbers", index], "The same vehicle is listed twice");
         seenPlates.add(normalizePlate(plate));
       });
     }
@@ -177,7 +202,7 @@ export const statusSchema = z.object({
 function memberIds(input: NewRegistrationInput, existingIds: readonly string[]) {
   const known = new Set(existingIds);
   const used = new Set<string>();
-  return input.members.map((m) => {
+  return input.members.map(m => {
     if (m.id && known.has(m.id) && !used.has(m.id)) {
       used.add(m.id);
       return m.id;
@@ -197,6 +222,17 @@ function memberIds(input: NewRegistrationInput, existingIds: readonly string[]) 
  */
 export function toCreateData(input: NewRegistrationInput, existingIds: readonly string[] = []) {
   const ids = memberIds(input, existingIds);
+  const members = input.members.map((m, index) => ({
+    ...m,
+    id: ids[index],
+    isPrimary: index === 0,
+    relation: input.type === "family" && index > 0 ? m.relation : null,
+    assistanceNote: m.needsAssistance ? m.assistanceNote : null,
+    // Someone who leaves the day they arrive has no night here, so no bed.
+    needsAccommodation:
+      (m.needsAccommodation ?? input.accommodationRequired) && m.departure.date > m.arrival.date,
+  }));
+
   return {
     // One registration per contact number; the unique index is on this.
     contactMobile: input.members[0]?.mobile ?? null,
@@ -204,30 +240,26 @@ export function toCreateData(input: NewRegistrationInput, existingIds: readonly 
     groupName: input.type === "individual" ? null : input.groupName,
     mandal: input.mandal,
     city: input.city,
-    members: input.members.map((m, index) => ({
-      ...m,
-      id: ids[index],
-      isPrimary: index === 0,
-      relation: input.type === "family" && index > 0 ? m.relation : null,
-      assistanceNote: m.needsAssistance ? m.assistanceNote : null,
-    })),
+    members,
     arrival: input.arrival,
     departure: input.departure,
     travel: {
       ...input.travel,
-      vehicleCount: input.travel.mode === "personal_vehicle" ? input.travel.vehicleCount ?? 1 : null,
+      vehicleCount:
+        input.travel.mode === "personal_vehicle" ? (input.travel.vehicleCount ?? 1) : null,
       vehicleNumbers:
         input.travel.mode === "personal_vehicle"
-          ? input.travel.vehicleNumbers.filter(Boolean).map((n) => n.toUpperCase())
+          ? input.travel.vehicleNumbers.filter(Boolean).map(n => n.toUpperCase())
           : [],
       needsPickup:
-        (input.travel.mode === "train" || input.travel.mode === "flight") && input.travel.needsPickup,
+        (input.travel.mode === "train" || input.travel.mode === "flight") &&
+        input.travel.needsPickup,
       needsDrop:
         (input.travel.mode === "train" || input.travel.mode === "flight") && input.travel.needsDrop,
     },
-    // A same-day visit has no night to stay, so no bed.
-    accommodationRequired:
-      input.accommodationRequired && input.members.some((m) => m.departure.date > m.arrival.date),
+    // True when anyone in the party has a bed coming; each person's own
+    // answer is on them.
+    accommodationRequired: members.some(m => m.needsAccommodation),
     notes: input.notes,
   };
 }
@@ -239,6 +271,18 @@ function compact<T extends Record<string, unknown>>(value: T) {
   };
 }
 
+/**
+ * Whether this person asked for a bed. Registrations from before the
+ * per-person answer existed only have the registration's, which then covered
+ * everyone.
+ */
+export function wantsBed(
+  registration: Pick<Registration, "accommodationRequired">,
+  member: { needsAccommodation?: boolean | null }
+) {
+  return registration.accommodationRequired && (member.needsAccommodation ?? true);
+}
+
 /** A stored registration in the shape the frontend reads. Internal fields stay behind. */
 export function toRegistrationDto(r: Registration) {
   return compact({
@@ -248,7 +292,7 @@ export function toRegistrationDto(r: Registration) {
     groupName: r.groupName,
     mandal: r.mandal,
     city: r.city,
-    members: r.members.map((m) => compact({ ...m })),
+    members: r.members.map(m => compact({ ...m, needsAccommodation: wantsBed(r, m) })),
     arrival: r.arrival,
     departure: r.departure,
     travel: compact({ ...r.travel }),

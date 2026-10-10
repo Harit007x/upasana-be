@@ -22,8 +22,7 @@
  *      even if a later step in the same run throws. `AccountAuditLog` is not a
  *      Prisma relation to `User`, so it is untouched by the cascade below.
  *   2. `prisma.user.delete()`, which cascades to every remaining row this
- *      schema still relates to the user — `Session`, `Account`,
- *      `Subscription` — exactly the purge the soft delete exists to have
+ *      schema still relates to the user — `Session` and `Account` — exactly the purge the soft delete exists to have
  *      deferred, not skipped.
  */
 import { prisma } from "../src/utils/db";
@@ -61,7 +60,7 @@ const main = async () => {
       },
     });
 
-    // Cascades to Session, Account and Subscription — see schema.prisma's
+    // Cascades to Session and Account — see schema.prisma's
     // `onDelete: Cascade` on each. This is the one line in the whole
     // account-deletion path that actually deletes user data, and it only
     // ever runs here.

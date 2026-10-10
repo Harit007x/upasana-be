@@ -9,7 +9,7 @@ import dotenvFlow from "dotenv-flow";
  * before the rest of that file's import graph is evaluated.
  *
  * Most modules here dodge the ordering problem by reading `process.env` lazily,
- * at call time (see src/lib/dodo.ts, src/lib/email.ts, src/lib/billing/plans.ts).
+ * at call time (see src/lib/email.ts).
  * `src/lib/auth.ts` cannot: `betterAuth()` takes its secret, base URL, trusted
  * origins and OAuth client credentials as plain values in a config object built
  * the moment the module is evaluated. Before this file existed, that evaluation

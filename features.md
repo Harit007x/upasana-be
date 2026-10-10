@@ -14,16 +14,9 @@ This template is designed to kickstart production-ready SaaS applications with a
 - **Admin Role Gating**: A `role` field on `User` gates a separate admin surface — no self-serve path to admin by design.
 - **Soft Account Deletion**: A 30-day grace period (`User.deletedAt`), with a restore endpoint and a standalone script (`scripts/hard-delete-scheduled-accounts.ts`) that purges anything past its grace period.
 
-## 💳 Billing — Dodo Payments
-- **Code-Defined Plan Table**: `src/lib/billing/plans.ts` is the single source of truth for pricing — read by the checkout flow, the subscription endpoint, the pricing page and the admin panel, so none of them can disagree.
-- **Hosted Checkout & Portal**: `POST /billing/checkout-session` and `POST /billing/portal-session` hand back Dodo-hosted URLs — no payment form to build or secure.
-- **Webhook-Driven State**: `POST /webhooks/dodo` verifies Dodo's signature, is idempotent against retried deliveries, and mirrors subscription state into the local database.
-- **Transactional Emails**: subscription activated/renewed/cancelled and payment-problem emails, sent via Resend.
-
 ## 🛡 Admin Panel (minimal, generic)
 - **Own Record**: `GET /admin/me` — confirms the signed-in session is both valid and actually admin.
-- **User Management**: `GET /admin/users` (paginated, filterable by search/role/status) and `GET /admin/users/:id` (profile, resolved plan, and a merged billing/auth/account activity timeline).
-- **Plan Table**: `GET /admin/plans` — the same plan table checkout uses, with Dodo product ids resolved live from the environment.
+- **User Management**: `GET /admin/users` (paginated, filterable by search/role/status) and `GET /admin/users/:id` (profile and a merged auth/account activity timeline).
 
 ## ⚙️ Background Jobs
 - **MongoDB-Backed Queue**: no Redis to run. A `job` collection with atomic claiming via guarded `updateMany` — two workers can never run the same job.

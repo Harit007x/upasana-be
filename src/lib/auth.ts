@@ -116,7 +116,7 @@ export const auth = betterAuth({
     },
     // Better Auth's own delete-user flow is disabled on purpose: it does a real
     // `prisma.user.delete()`, which this schema cascades — every session and
-    // subscription row, gone in one call, with no way to stop the cascade
+    // account row, gone in one call, with no way to stop the cascade
     // partway through and turn it into a soft delete instead.
     //
     // Account deletion is `POST /users/delete` (userController.ts) now, which

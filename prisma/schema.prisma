@@ -8,7 +8,7 @@ datasource db {
 }
 
 // ---------------------------------------------------------------------------
-// The SaaS chassis: auth, billing, account lifecycle, background jobs.
+// The SaaS chassis: auth, account lifecycle, background jobs.
 //
 // Everything here is product-agnostic. Add your own models below the marker at
 // the bottom of this file and hang them off `User` with `onDelete: Cascade`, so
@@ -27,27 +27,11 @@ model User {
   sessions Session[]
   accounts Account[]
 
-  // Dodo Payments customer this user maps to. Created lazily on first checkout
-  // rather than at signup, so users who never pay never reach the payment
-  // provider at all.
-  //
-  // NOT `@unique`, though it is meant to be. MongoDB treats a missing field as a
-  // value, so a plain unique index allows exactly ONE user without a customer id
-  // — every user who has never paid is a duplicate of the last one, and the
-  // index refuses to build at all once there are two of them.
-  //
-  // What is wanted is a unique index that ignores the nulls, which Prisma cannot
-  // express. `scripts/ensure-partial-indexes.ts` creates it; run that after any
-  // `prisma db push`, since push reconciles indexes against this file and drops
-  // the ones it does not know about.
-  dodoCustomerId String?
-
   /// When the user finished onboarding. Null means they have not, and the
   /// frontend's onboarding guard should send them to /onboarding until they do
   /// — so a null here is load-bearing, not merely missing.
   ///
-  /// Stamped once and never moved: the endpoint is idempotent, because the
-  /// checkout path can call it and then return through /billing/return.
+  /// Stamped once and never moved: the endpoint is idempotent.
   onboardedAt DateTime?
 
   /// "user", "staff", "sanchalak" or "admin". Staff, sanchalaks and admins
@@ -67,18 +51,15 @@ model User {
   /// Null: a normal, active account. Set: the account requested deletion and is
   /// in its 30-day grace period — `scripts/hard-delete-scheduled-accounts.ts`
   /// purges anything still set 30 days after this timestamp. Nothing else is
-  /// touched at the moment this is set — every subscription is kept exactly as
-  /// it was, which is the entire point of a *soft* delete. Surfaced to the
+  /// touched at the moment this is set, which is the entire point of a *soft*
+  /// delete. Surfaced to the
   /// frontend via Better Auth's `additionalFields` (`input: false` — only
   /// `POST /users/delete` and `/users/restore` may write it), so a signed-back-in
   /// user can be sent to a restore screen instead of the app.
   deletedAt DateTime?
 
-  subscriptions Subscription[]
-
   // ---- Your product's relations go here ----
 
-  @@index([dodoCustomerId])
   @@index([deletedAt])
   @@map("user")
 }
@@ -142,55 +123,6 @@ model Account {
 
   @@index([userId])
   @@map("account")
-}
-
-/// Local mirror of a Dodo Payments subscription. Dodo remains the source of
-/// truth; this row exists so the app can answer "is this user entitled?" from
-/// its own database instead of calling the API on every request.
-///
-/// Only ever written from a verified webhook. `status` is a plain string rather
-/// than an enum on purpose: Dodo can introduce a status we have not modelled yet
-/// (`pending` already exists alongside the five documented ones), and a webhook
-/// consumer that throws on an unknown value is a webhook consumer that drops
-/// events.
-model Subscription {
-  id                 String    @id @default(auto()) @map("_id") @db.ObjectId
-  dodoSubscriptionId String    @unique
-  userId             String    @db.ObjectId
-  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  productId          String
-  /// pending | active | on_hold | cancelled | expired | failed
-  status             String
-  /// End of the current billing period, i.e. how long access is paid up for.
-  currentPeriodEnd   DateTime?
-  cancelAtPeriodEnd  Boolean   @default(false)
-  /// When the free trial ends, or null if this subscription never had one.
-  ///
-  /// Dodo has no `trialing` status — a subscription inside its trial is plainly
-  /// `active`. Trial-ness is carried instead by `trial_period_days`, so it is
-  /// resolved once at sync time (created_at + those days) and stored, rather
-  /// than recomputed from two fields at every gate.
-  trialEndsAt        DateTime?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
-
-  @@index([userId])
-  @@index([status])
-  @@map("subscription")
-}
-
-/// One row per webhook delivery, keyed by the `webhook-id` header.
-///
-/// Dodo retries a failed delivery up to 8 times, so handlers must tolerate
-/// receiving the same event twice. The unique index below is what makes that
-/// actually true instead of merely intended.
-model ProcessedWebhook {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  webhookId   String   @unique
-  eventType   String
-  processedAt DateTime @default(now())
-
-  @@map("processed_webhook")
 }
 
 model Verification {
@@ -335,7 +267,7 @@ model PhoneVerification {
   verifiedAt     DateTime?
   /// The proof handed to the browser on success. Plain index rather than
   /// `@unique`: unverified rows have none, and MongoDB counts a missing field
-  /// as a value (see `User.dodoCustomerId`).
+  /// as a value (see `Registration.contactMobile`).
   tokenHash      String?
   tokenExpiresAt DateTime?
   /// Set when a registration used the token. A token works once.
@@ -395,9 +327,13 @@ model Registration {
 
   /// The primary contact's number (E.164), copied out of `members` so the
   /// database itself can enforce ONE registration per contact number: a
-  /// partial unique index, created by scripts/ensure-partial-indexes.ts (a
-  /// plain `@unique` would count missing values as duplicates — see
-  /// `User.dodoCustomerId`). Kept in step with members[0] by toCreateData.
+  /// partial unique index, created by scripts/ensure-partial-indexes.ts. Not
+  /// `@unique`: MongoDB treats a missing field as a value, so a plain unique
+  /// index allows only ONE registration without a number and refuses to build
+  /// once there are two. Prisma cannot express the partial index that ignores
+  /// them, and `prisma db push` drops indexes it does not know about — so run
+  /// that script after every push (`pnpm db:push` does). Kept in step with
+  /// members[0] by toCreateData.
   contactMobile String?
 
   /// How the primary contact's mobile was confirmed: "otp" (a code on
@@ -433,19 +369,23 @@ type RegistrationMember {
   /// Stable across edits (kept by toCreateData), because room allotments are
   /// keyed on it. Older registrations have "m0", "m1", …; new people get a
   /// random one.
-  id              String
-  fullName        String
+  id                 String
+  fullName           String
   /// "male" | "female"
-  gender          String
-  age             Int
+  gender             String
+  age                Int
   /// E.164, e.g. "+919876543210". Required on the primary contact.
-  mobile          String?
-  relation        String?
-  isPrimary       Boolean
-  needsAssistance Boolean
-  assistanceNote  String?
-  arrival         StayPoint
-  departure       StayPoint
+  mobile             String?
+  relation           String?
+  isPrimary          Boolean
+  needsAssistance    Boolean
+  assistanceNote     String?
+  arrival            StayPoint
+  departure          StayPoint
+  /// Whether this person asked for a bed. Lets a family put up only some of
+  /// its members. Null on registrations from before it existed: read it as
+  /// the registration's `accommodationRequired` (see `wantsBed`).
+  needsAccommodation Boolean?
 }
 
 /// A calendar day at the venue ("2027-01-30") and a rough time of day.
@@ -511,13 +451,18 @@ model AccommodationPlace {
 
 type AccommodationRoom {
   /// Stable: allotments point at it, so relabelling a room keeps its people.
-  id          String
+  id        String
   /// "12", "G-04", "Hall A".
-  label       String
-  beds        Int
-  /// "gents" | "ladies" | "family"
-  kind        String
-  groundFloor Boolean
+  label     String
+  beds      Int
+  /// Mattresses the room can take on top of its beds, used only when the
+  /// beds run out. Missing on rooms saved before it existed: none.
+  extraBeds Int?
+  /// "gents" | "ladies" | "family" | "general" (anyone; only the beds limit it)
+  kind      String
+  /// 0 = ground floor, 1 = 1st floor … 4 = 4th floor. People who need
+  /// assistance or are 60+ are offered the lowest floors first.
+  floor     Int
 }
 
 /// One person's bed: a member of a registration, in a room. Their nights come
@@ -533,6 +478,10 @@ model RoomAllotment {
 
   allottedByName String
   allottedAt     DateTime @default(now())
+
+  /// The team let them share a family room with another registration —
+  /// relatives registered separately — so they are not "another family" in it.
+  sharesRoom Boolean @default(false)
 
   @@unique([registrationId, memberId])
   @@index([placeId])

@@ -227,9 +227,9 @@ npx prisma db push
 
 **Run this after every `prisma db push`.** Push reconciles indexes against
 `schema.prisma` and drops any it does not recognise — including the partial
-unique index on `User.dodoCustomerId`, which Prisma cannot express. Without it,
-two users can end up sharing a Dodo customer id and a billing webhook can credit
-the wrong account.
+unique index on `Registration.contactMobile`, which Prisma cannot express.
+Without it, the database no longer enforces one registration per contact
+number. `pnpm db:push` runs the push and this script together.
 
 ```bash
 npx ts-node scripts/ensure-partial-indexes.ts

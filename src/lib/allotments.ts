@@ -1,6 +1,7 @@
 import type { Registration } from "@prisma/client";
 
 import { buildStayNotice, sameNotice, type StayNotice } from "./accommodation";
+import { wantsBed } from "./registrations";
 import { prisma } from "../utils/db";
 
 /**
@@ -8,7 +9,8 @@ import { prisma } from "../utils/db";
  * any change to it:
  *
  * - cancelled, or no longer asking for accommodation: every bed is freed;
- * - someone removed from the party: their bed is freed.
+ * - someone removed from the party, or no longer asking for a bed: their bed
+ *   is freed.
  *
  * Anything else that stops fitting — new dates that overfill a room, a
  * registration back to pending after a devotee's edit — keeps its rooms and
@@ -20,8 +22,14 @@ export async function releaseStaleAllotments(registration: Registration) {
     await prisma.roomAllotment.deleteMany({ where: { registrationId: registration.id } });
     return;
   }
+  // Anyone removed from the party, or who no longer asks for a bed.
   await prisma.roomAllotment.deleteMany({
-    where: { registrationId: registration.id, memberId: { notIn: registration.members.map((m) => m.id) } },
+    where: {
+      registrationId: registration.id,
+      memberId: {
+        notIn: registration.members.filter(m => wantsBed(registration, m)).map(m => m.id),
+      },
+    },
   });
 }
 
@@ -31,15 +39,19 @@ export async function releaseStaleAllotments(registration: Registration) {
  * being updated rather than showing a room they no longer have.
  */
 export async function stayForDevotee(registrations: Registration[]) {
-  const sent = registrations.filter((r) => r.stayNoticeSentAt);
+  // Sent, and still asking for a room: someone who no longer needs one (or
+  // was cancelled) is not told their details are "being updated".
+  const sent = registrations.filter(
+    r => r.stayNoticeSentAt && r.accommodationRequired && r.status !== "cancelled"
+  );
   const result = new Map<string, { notice: StayNotice | null; upToDate: boolean }>();
   if (sent.length === 0) return result;
 
   const [allotments, places] = await Promise.all([
-    prisma.roomAllotment.findMany({ where: { registrationId: { in: sent.map((r) => r.id) } } }),
+    prisma.roomAllotment.findMany({ where: { registrationId: { in: sent.map(r => r.id) } } }),
     prisma.accommodationPlace.findMany(),
   ]);
-  const placeMap = new Map(places.map((p) => [p.id, p]));
+  const placeMap = new Map(places.map(p => [p.id, p]));
   for (const registration of sent) {
     const current = buildStayNotice(registration, allotments, placeMap);
     const upToDate = !!current && sameNotice(current, registration.stayNotice);

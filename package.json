@@ -1,7 +1,7 @@
 {
   "name": "upasana-be",
   "version": "1.0.0",
-  "description": "Upasana backend \u2014 Express, Prisma, Better Auth and Dodo Payments on the madmax SaaS chassis",
+  "description": "Upasana backend \u2014 Express, Prisma and Better Auth on the madmax SaaS chassis",
   "main": "index.js",
   "scripts": {
     "dev": "cross-env NODE_ENV=development nodemon src/index.ts",
@@ -36,7 +36,6 @@
     "better-auth": "^1.6.25",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
-    "dodopayments": "^2.43.0",
     "dotenv-flow": "^4.1.0",
     "express": "^5.1.0",
     "prisma": "^6.17.0",

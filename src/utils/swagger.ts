@@ -8,7 +8,7 @@ const options: swaggerJsdoc.Options = {
       title: process.env.BRAND_NAME ? `${process.env.BRAND_NAME} API` : "SaaS Backend API",
       version,
       description:
-        "Auth (Better Auth), billing (Dodo Payments) and account-lifecycle endpoints. " +
+        "Auth (Better Auth) and account-lifecycle endpoints. " +
         "Document your own routes with @openapi JSDoc blocks and they appear here.",
     },
     servers: [

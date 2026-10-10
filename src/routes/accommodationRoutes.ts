@@ -42,9 +42,12 @@ accommodationRouter.get("/", overview);
  *   post:
  *     summary: Put people in a room
  *     description: >
- *       `{ registrationId, memberIds, placeId, roomId }`. Moves anyone who
- *       already had a room. The registration must be confirmed and have asked
- *       for accommodation; the room must fit them on every night.
+ *       `{ registrationId, assignments: [{ memberId, placeId, roomId }] }` —
+ *       a room per person, saved together or not at all — or the shorter
+ *       `{ registrationId, memberIds, placeId, roomId }` for one room. Moves
+ *       anyone who already had a room. The registration must be confirmed and
+ *       have asked for accommodation; every room must fit its people on every
+ *       night.
  *     tags: [Accommodation]
  *     responses:
  *       200:

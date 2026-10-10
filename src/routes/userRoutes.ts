@@ -27,9 +27,7 @@ userRouter.use(protect);
  *       guard. The call itself is what completes onboarding — there is
  *       nothing else to submit.
  *
- *       Idempotent: a repeat call leaves the original timestamp alone. That
- *       matters because the paid path calls this before leaving for Dodo's
- *       hosted checkout.
+ *       Idempotent: a repeat call leaves the original timestamp alone.
  *
  *       Declared to Better Auth with `input: false`, so this endpoint is the
  *       only way to write it.
@@ -49,13 +47,12 @@ userRouter.post("/onboarding", completeOnboarding);
  *     summary: Schedule the signed-in account for deletion
  *     description: >
  *       A soft delete: sets `deletedAt` and revokes every session. Nothing
- *       else — no job, subscription or render count — is touched. The account
+ *       else is touched. The account
  *       is purged for real 30 days later, by
  *       `scripts/hard-delete-scheduled-accounts.ts`, unless `/users/restore`
  *       is called first.
  *
- *       Refused with `ACTIVE_SUBSCRIPTION` while a subscription is still
- *       auto-renewing — cancel it first. Verified by typing the account's own
+ *       Verified by typing the account's own
  *       email address back, not a password: `protect` already requires a
  *       valid session, and a 30-day-reversible action does not need a
  *       forgotten password standing in its way.
@@ -74,8 +71,6 @@ userRouter.post("/onboarding", completeOnboarding);
  *         description: Scheduled for deletion (or already was)
  *       401:
  *         description: EMAIL_MISMATCH
- *       409:
- *         description: ACTIVE_SUBSCRIPTION
  */
 userRouter.post("/delete", deleteAccount);
 

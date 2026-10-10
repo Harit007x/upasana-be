@@ -10,6 +10,7 @@ import {
   nightsOf,
   occupantsOf,
   placeInputSchema,
+  roomIssue,
   roomProblem,
   sameNotice,
   stayNoticeLine,
@@ -21,6 +22,7 @@ import {
   type StayNotice,
 } from "../lib/accommodation";
 import { EVENT_NAME } from "../lib/event";
+import { wantsBed } from "../lib/registrations";
 import { WHATSAPP_TEMPLATES, isWhatsAppConfigured, sendWhatsAppTemplate } from "../lib/whatsapp";
 import { registrationScope } from "../middlewares/authMiddleware";
 import { prisma } from "../utils/db";
@@ -42,7 +44,7 @@ function validationError(res: Response, issues: { path: PropertyKey[]; message: 
     success: false,
     code: "VALIDATION_ERROR",
     message: issues[0]?.message ?? "Some details are missing or invalid.",
-    errors: issues.map((i) => ({ path: i.path.map(String).join("."), message: i.message })),
+    errors: issues.map(i => ({ path: i.path.map(String).join("."), message: i.message })),
   });
 }
 
@@ -71,9 +73,10 @@ async function withRetry<T>(run: () => Promise<T>): Promise<T> {
     try {
       return await run();
     } catch (error) {
-      const conflict = error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034";
+      const conflict =
+        error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034";
       if (!conflict || attempt >= 4) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 40 * attempt));
+      await new Promise(resolve => setTimeout(resolve, 40 * attempt));
     }
   }
 }
@@ -87,7 +90,8 @@ function noticeState(registration: Registration, current: StayNotice | null) {
     sentAt: registration.stayNoticeSentAt?.toISOString(),
     sentByName: registration.stayNoticeSentByName ?? undefined,
     // Sent, and nothing about anyone's room has changed since.
-    upToDate: !!registration.stayNoticeSentAt && !!current && sameNotice(current, registration.stayNotice),
+    upToDate:
+      !!registration.stayNoticeSentAt && !!current && sameNotice(current, registration.stayNotice),
   };
 }
 
@@ -105,11 +109,13 @@ const overview = async (req: Request, res: Response): Promise<void> => {
     prisma.roomAllotment.findMany(),
   ]);
   const registrations = await prisma.registration.findMany({
-    where: { id: { in: [...new Set(allAllotments.map((a) => a.registrationId))] }, ...scope },
+    where: { id: { in: [...new Set(allAllotments.map(a => a.registrationId))] }, ...scope },
   });
-  const visible = new Set(registrations.map((r) => r.id));
-  const allotments = scoped ? allAllotments.filter((a) => visible.has(a.registrationId)) : allAllotments;
-  const placeMap = new Map(places.map((p) => [p.id, p]));
+  const visible = new Set(registrations.map(r => r.id));
+  const allotments = scoped
+    ? allAllotments.filter(a => visible.has(a.registrationId))
+    : allAllotments;
+  const placeMap = new Map(places.map(p => [p.id, p]));
 
   res.status(200).json({
     success: true,
@@ -117,8 +123,8 @@ const overview = async (req: Request, res: Response): Promise<void> => {
       places: places.map(toPlaceDto),
       allotments: allotments.map(toAllotmentDto),
       notices: registrations
-        .filter((r) => r.stayNoticeSentAt || allotments.some((a) => a.registrationId === r.id))
-        .map((r) => noticeState(r, buildStayNotice(r, allotments, placeMap))),
+        .filter(r => r.stayNoticeSentAt || allotments.some(a => a.registrationId === r.id))
+        .map(r => noticeState(r, buildStayNotice(r, allotments, placeMap))),
       whatsApp: isWhatsAppConfigured(),
     },
   });
@@ -131,12 +137,22 @@ const createPlace = async (req: Request, res: Response): Promise<void> => {
   const last = await prisma.accommodationPlace.findFirst({ orderBy: { sortOrder: "desc" } });
   try {
     const place = await prisma.accommodationPlace.create({
-      data: { ...parsed.data, rooms: withRoomIds(parsed.data.rooms), sortOrder: (last?.sortOrder ?? 0) + 1 },
+      data: {
+        ...parsed.data,
+        rooms: withRoomIds(parsed.data.rooms),
+        sortOrder: (last?.sortOrder ?? 0) + 1,
+      },
     });
     res.status(201).json({ success: true, data: toPlaceDto(place) });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      res.status(409).json({ success: false, code: "NAME_TAKEN", message: `There is already a place called ${parsed.data.name}.` });
+      res
+        .status(409)
+        .json({
+          success: false,
+          code: "NAME_TAKEN",
+          message: `There is already a place called ${parsed.data.name}.`,
+        });
       return;
     }
     throw error;
@@ -151,29 +167,41 @@ const createPlace = async (req: Request, res: Response): Promise<void> => {
  */
 const updatePlace = async (req: Request, res: Response): Promise<void> => {
   const id = String(req.params.id);
-  if (!isObjectId(id)) return void res.status(404).json({ success: false, code: "NOT_FOUND", message: "Place not found" });
+  if (!isObjectId(id))
+    return void res
+      .status(404)
+      .json({ success: false, code: "NOT_FOUND", message: "Place not found" });
   const parsed = placeInputSchema.safeParse(req.body);
   if (!parsed.success) return validationError(res, parsed.error.issues);
 
   try {
     const place = await withRetry(() =>
-      prisma.$transaction(async (tx) => {
+      prisma.$transaction(async tx => {
         const existing = await tx.accommodationPlace.findUnique({ where: { id } });
         if (!existing) throw new Refusal(404, "NOT_FOUND", "Place not found");
-        const rooms = withRoomIds(parsed.data.rooms, existing.rooms.map((r) => r.id));
+        const rooms = withRoomIds(
+          parsed.data.rooms,
+          existing.rooms.map(r => r.id)
+        );
 
         const allotments = await tx.roomAllotment.findMany({ where: { placeId: id } });
         const registrations = new Map(
           (
-            await tx.registration.findMany({ where: { id: { in: [...new Set(allotments.map((a) => a.registrationId))] } } })
-          ).map((r) => [r.id, r])
+            await tx.registration.findMany({
+              where: { id: { in: [...new Set(allotments.map(a => a.registrationId))] } },
+            })
+          ).map(r => [r.id, r])
         );
         for (const old of existing.rooms) {
-          const inRoom = allotments.filter((a) => a.roomId === old.id);
+          const inRoom = allotments.filter(a => a.roomId === old.id);
           if (inRoom.length === 0) continue;
-          const now = rooms.find((r) => r.id === old.id);
+          const now = rooms.find(r => r.id === old.id);
           if (!now) {
-            throw new Refusal(409, "ROOM_IN_USE", `Room ${old.label} has people in it — move them to another room first.`);
+            throw new Refusal(
+              409,
+              "ROOM_IN_USE",
+              `Room ${old.label} has people in it — move them to another room first.`
+            );
           }
           const problem = roomProblem(now, occupantsOf(inRoom, registrations));
           if (problem) throw new Refusal(409, "ROOM_IN_USE", `${problem}. Move someone out first.`);
@@ -189,7 +217,13 @@ const updatePlace = async (req: Request, res: Response): Promise<void> => {
   } catch (error) {
     if (error instanceof Refusal) return void refuse(res, error);
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      res.status(409).json({ success: false, code: "NAME_TAKEN", message: `There is already a place called ${parsed.data.name}.` });
+      res
+        .status(409)
+        .json({
+          success: false,
+          code: "NAME_TAKEN",
+          message: `There is already a place called ${parsed.data.name}.`,
+        });
       return;
     }
     throw error;
@@ -198,8 +232,13 @@ const updatePlace = async (req: Request, res: Response): Promise<void> => {
 
 const deletePlace = async (req: Request, res: Response): Promise<void> => {
   const id = String(req.params.id);
-  const place = isObjectId(id) ? await prisma.accommodationPlace.findUnique({ where: { id } }) : null;
-  if (!place) return void res.status(404).json({ success: false, code: "NOT_FOUND", message: "Place not found" });
+  const place = isObjectId(id)
+    ? await prisma.accommodationPlace.findUnique({ where: { id } })
+    : null;
+  if (!place)
+    return void res
+      .status(404)
+      .json({ success: false, code: "NOT_FOUND", message: "Place not found" });
   const used = await prisma.roomAllotment.count({ where: { placeId: id } });
   if (used > 0) {
     res.status(409).json({
@@ -213,30 +252,65 @@ const deletePlace = async (req: Request, res: Response): Promise<void> => {
   res.status(200).json({ success: true, data: { id } });
 };
 
-const allotSchema = z.object({
-  registrationId: objectId,
-  memberIds: z.array(z.string().max(40)).min(1, "Pick who goes in this room").max(100),
+const assignment = z.object({
+  memberId: z.string().max(40),
   placeId: objectId,
   roomId: z.string().min(1).max(40),
 });
 
+/**
+ * Either a plan — each person with their own room, so a family split across
+ * two rooms is saved in one go — or the older shape, everyone into one room.
+ */
+const allotSchema = z.union([
+  z.object({
+    registrationId: objectId,
+    assignments: z.array(assignment).min(1, "Pick who goes where").max(100),
+    /** Let them share a family room another registration has — relatives. */
+    allowSharing: z.boolean().optional(),
+  }),
+  z
+    .object({
+      registrationId: objectId,
+      memberIds: z.array(z.string().max(40)).min(1, "Pick who goes in this room").max(100),
+      placeId: objectId,
+      roomId: z.string().min(1).max(40),
+      allowSharing: z.boolean().optional(),
+    })
+    .transform(({ registrationId, memberIds, placeId, roomId, allowSharing }) => ({
+      registrationId,
+      assignments: memberIds.map(memberId => ({ memberId, placeId, roomId })),
+      allowSharing,
+    })),
+]);
+
 /** The registration's allotments after a change, for the response. */
 const allotmentsOf = (registrationId: string) =>
-  prisma.roomAllotment.findMany({ where: { registrationId } }).then((rows) => rows.map(toAllotmentDto));
+  prisma.roomAllotment
+    .findMany({ where: { registrationId } })
+    .then(rows => rows.map(toAllotmentDto));
 
 /**
- * Puts some of a registration's people in one room — moving them, if they
- * had a room already. Checked inside a transaction that also writes the place,
- * so two volunteers filling the same room at once cannot both get its last bed.
+ * Puts a registration's people in rooms — one room for everyone, or a plan
+ * with a room each — moving anyone who had a room already. Every room the
+ * plan touches is checked with everyone who will be in it, inside one
+ * transaction that also writes each place involved, so two volunteers filling
+ * the same room at once cannot both get its last bed, and a plan is saved
+ * whole or not at all.
  */
 const allot = async (req: Request, res: Response): Promise<void> => {
   const parsed = allotSchema.safeParse(req.body);
   if (!parsed.success) return validationError(res, parsed.error.issues);
-  const { registrationId, placeId, roomId } = parsed.data;
-  const memberIds = [...new Set(parsed.data.memberIds)];
+  const { registrationId } = parsed.data;
+  // One room per person: the last one given wins if someone is listed twice.
+  const plan = new Map(parsed.data.assignments.map(a => [a.memberId, a]));
+  const memberIds = [...plan.keys()];
 
   const registration = await prisma.registration.findUnique({ where: { id: registrationId } });
-  if (!registration) return void res.status(404).json({ success: false, code: "NOT_FOUND", message: "Registration not found" });
+  if (!registration)
+    return void res
+      .status(404)
+      .json({ success: false, code: "NOT_FOUND", message: "Registration not found" });
   if (!ALLOTTABLE_STATUSES.has(registration.status)) {
     res.status(409).json({
       success: false,
@@ -256,12 +330,27 @@ const allot = async (req: Request, res: Response): Promise<void> => {
     });
     return;
   }
-  const members = memberIds.map((id) => registration.members.find((m) => m.id === id));
-  if (members.some((m) => !m)) {
-    res.status(400).json({ success: false, code: "UNKNOWN_MEMBER", message: "Someone picked is no longer on this registration. Reload and try again." });
+  const members = memberIds.map(id => registration.members.find(m => m.id === id));
+  if (members.some(m => !m)) {
+    res
+      .status(400)
+      .json({
+        success: false,
+        code: "UNKNOWN_MEMBER",
+        message: "Someone picked is no longer on this registration. Reload and try again.",
+      });
     return;
   }
-  const sameDay = members.find((m) => m && nightsOf(m).length === 0);
+  const noBedAsked = members.find(m => m && !wantsBed(registration, m));
+  if (noBedAsked) {
+    res.status(409).json({
+      success: false,
+      code: "NO_STAY_REQUESTED",
+      message: `${noBedAsked.fullName} did not ask for accommodation. Tick it for them on the registration first.`,
+    });
+    return;
+  }
+  const sameDay = members.find(m => m && nightsOf(m).length === 0);
   if (sameDay) {
     res.status(409).json({
       success: false,
@@ -273,42 +362,79 @@ const allot = async (req: Request, res: Response): Promise<void> => {
 
   try {
     await withRetry(() =>
-      prisma.$transaction(async (tx) => {
-        // Writing the place first is what makes a concurrent allotment into
+      prisma.$transaction(async tx => {
+        // Writing each place first is what makes a concurrent allotment into
         // it conflict, instead of both reading the same free bed.
-        const place = await tx.accommodationPlace
-          .update({ where: { id: placeId }, data: { version: { increment: 1 } } })
-          .catch((error: unknown) => {
-            if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
-              throw new Refusal(404, "NOT_FOUND", "That place no longer exists. Reload and try again.");
-            }
-            throw error;
+        const placeIds = [...new Set([...plan.values()].map(a => a.placeId))].sort();
+        const places = new Map<string, AccommodationPlace>();
+        for (const placeId of placeIds) {
+          const place = await tx.accommodationPlace
+            .update({ where: { id: placeId }, data: { version: { increment: 1 } } })
+            .catch((error: unknown) => {
+              if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+                throw new Refusal(404, "NOT_FOUND", "That place no longer exists. Reload and try again.");
+              }
+              throw error;
+            });
+          places.set(placeId, place);
+        }
+
+        // Who was let into another family's room, to store with their bed.
+        const sharing = new Map<string, boolean>();
+
+        // Each room the plan fills, with the people already there (not
+        // counting anyone in this plan — they are moving) and those coming.
+        const rooms = new Map<string, { placeId: string; roomId: string; incoming: Occupant[] }>();
+        members.forEach(m => {
+          const { placeId, roomId } = plan.get(m!.id)!;
+          const key = `${placeId}:${roomId}`;
+          const entry = rooms.get(key) ?? { placeId, roomId, incoming: [] };
+          entry.incoming.push({
+            registrationId,
+            memberId: m!.id,
+            fullName: m!.fullName,
+            gender: m!.gender,
+            age: m!.age,
+            nights: nightsOf(m!),
+            shared: false,
           });
-        const room = place.rooms.find((r) => r.id === roomId);
-        if (!room) throw new Refusal(404, "NOT_FOUND", "That room no longer exists. Reload and try again.");
+          rooms.set(key, entry);
+        });
 
-        const inRoom = await tx.roomAllotment.findMany({ where: { placeId, roomId } });
-        const others = inRoom.filter((a) => !(a.registrationId === registrationId && memberIds.includes(a.memberId)));
-        const otherRegistrations = new Map(
-          (
-            await tx.registration.findMany({ where: { id: { in: [...new Set(others.map((a) => a.registrationId))] } } })
-          ).map((r) => [r.id, r])
-        );
-        const incoming: Occupant[] = members.map((m) => ({
-          registrationId,
-          memberId: m!.id,
-          fullName: m!.fullName,
-          gender: m!.gender,
-          nights: nightsOf(m!),
-        }));
-        const problem = roomProblem(room, [...occupantsOf(others, otherRegistrations), ...incoming]);
-        if (problem) throw new Refusal(409, "ROOM_PROBLEM", `${problem}.`);
+        for (const { placeId, roomId, incoming } of rooms.values()) {
+          const place = places.get(placeId)!;
+          const room = place.rooms.find(r => r.id === roomId);
+          if (!room)
+            throw new Refusal(404, "NOT_FOUND", "A room in this plan no longer exists. Reload and try again.");
+          const inRoom = await tx.roomAllotment.findMany({ where: { placeId, roomId } });
+          const others = inRoom.filter(
+            a => !(a.registrationId === registrationId && plan.has(a.memberId))
+          );
+          const otherRegistrations = new Map(
+            (
+              await tx.registration.findMany({
+                where: { id: { in: [...new Set(others.map(a => a.registrationId))] } },
+              })
+            ).map(r => [r.id, r])
+          );
+          const already = occupantsOf(others, otherRegistrations);
+          let issue = roomIssue(room, [...already, ...incoming]);
+          // Relatives registered separately: the team may let them share
+          // another registration's family room. Only that rule gives way.
+          if (issue?.kind === "family" && parsed.data.allowSharing) {
+            incoming.forEach(o => (o.shared = true));
+            issue = roomIssue(room, [...already, ...incoming]);
+          }
+          if (issue) throw new Refusal(409, "ROOM_PROBLEM", `${place.name}: ${issue.message}.`);
+          incoming.forEach(o => sharing.set(o.memberId, o.shared));
+        }
 
-        for (const memberId of memberIds) {
+        for (const [memberId, { placeId, roomId }] of plan) {
+          const sharesRoom = sharing.get(memberId) ?? false;
           await tx.roomAllotment.upsert({
             where: { registrationId_memberId: { registrationId, memberId } },
-            create: { registrationId, memberId, placeId, roomId, allottedByName: req.user.name },
-            update: { placeId, roomId, allottedByName: req.user.name, allottedAt: new Date() },
+            create: { registrationId, memberId, placeId, roomId, sharesRoom, allottedByName: req.user.name },
+            update: { placeId, roomId, sharesRoom, allottedByName: req.user.name, allottedAt: new Date() },
           });
         }
       })
@@ -337,19 +463,27 @@ const release = async (req: Request, res: Response): Promise<void> => {
 
 /** The registration with its current notice, or a refusal. */
 async function noticeFor(id: string) {
-  const registration = isObjectId(id) ? await prisma.registration.findUnique({ where: { id } }) : null;
+  const registration = isObjectId(id)
+    ? await prisma.registration.findUnique({ where: { id } })
+    : null;
   if (!registration) throw new Refusal(404, "NOT_FOUND", "Registration not found");
   if (!ALLOTTABLE_STATUSES.has(registration.status)) {
-    throw new Refusal(409, "NOT_CONFIRMED", `${registration.code} is not confirmed, so its room details are not final.`);
+    throw new Refusal(
+      409,
+      "NOT_CONFIRMED",
+      `${registration.code} is not confirmed, so its room details are not final.`
+    );
   }
   const [allotments, places] = await Promise.all([
     prisma.roomAllotment.findMany({ where: { registrationId: id } }),
     prisma.accommodationPlace.findMany(),
   ]);
-  const notice = buildStayNotice(registration, allotments, new Map(places.map((p) => [p.id, p])));
-  if (!notice) throw new Refusal(409, "NOTHING_ALLOTTED", `Nobody in ${registration.code} has a room yet.`);
+  const notice = buildStayNotice(registration, allotments, new Map(places.map(p => [p.id, p])));
+  if (!notice)
+    throw new Refusal(409, "NOTHING_ALLOTTED", `Nobody in ${registration.code} has a room yet.`);
   const contact = registration.contactMobile ?? registration.members[0]?.mobile;
-  if (!contact) throw new Refusal(409, "NO_CONTACT", `${registration.code} has no contact number to send to.`);
+  if (!contact)
+    throw new Refusal(409, "NO_CONTACT", `${registration.code} has no contact number to send to.`);
   return { registration, notice, contact, complete: fullyAllotted(registration, allotments) };
 }
 
@@ -440,15 +574,22 @@ const sendAllNotices = async (req: Request, res: Response): Promise<void> => {
     res.status(503).json({
       success: false,
       code: "WHATSAPP_NOT_CONFIGURED",
-      message: "WhatsApp is not set up on the server yet. Send room details one by one from your own phone.",
+      message:
+        "WhatsApp is not set up on the server yet. Send room details one by one from your own phone.",
     });
     return;
   }
 
-  const [allotments, places] = await Promise.all([prisma.roomAllotment.findMany(), prisma.accommodationPlace.findMany()]);
-  const placeMap = new Map<string, AccommodationPlace>(places.map((p) => [p.id, p]));
+  const [allotments, places] = await Promise.all([
+    prisma.roomAllotment.findMany(),
+    prisma.accommodationPlace.findMany(),
+  ]);
+  const placeMap = new Map<string, AccommodationPlace>(places.map(p => [p.id, p]));
   const registrations = await prisma.registration.findMany({
-    where: { id: { in: [...new Set(allotments.map((a) => a.registrationId))] }, status: { in: [...ALLOTTABLE_STATUSES] } },
+    where: {
+      id: { in: [...new Set(allotments.map(a => a.registrationId))] },
+      status: { in: [...ALLOTTABLE_STATUSES] },
+    },
     orderBy: { sequence: "asc" },
   });
 
@@ -457,7 +598,8 @@ const sendAllNotices = async (req: Request, res: Response): Promise<void> => {
   const failed: string[] = [];
   for (const registration of registrations) {
     const notice = buildStayNotice(registration, allotments, placeMap);
-    if (!notice || (registration.stayNoticeSentAt && sameNotice(notice, registration.stayNotice))) continue;
+    if (!notice || (registration.stayNoticeSentAt && sameNotice(notice, registration.stayNotice)))
+      continue;
     if (!fullyAllotted(registration, allotments)) {
       incomplete++;
       continue;

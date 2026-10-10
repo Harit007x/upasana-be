@@ -17,8 +17,7 @@ import { recordUsage } from "../usage";
 
 /**
  * Sonnet is the sensible default: it is the cheapest model that is good at most
- * production tasks, and cost per call is usually what decides whether the
- * pricing in `src/lib/billing/plans.ts` works. Pass `model` per call to override
+ * production tasks. Pass `model` per call to override
  * — reach for Opus on genuinely hard reasoning, Haiku on classification.
  */
 export const DEFAULT_MODEL = "claude-sonnet-5";
