@@ -3,6 +3,7 @@ import { adminController } from "../controllers/adminController";
 import { adminUsersController } from "../controllers/adminUsersController";
 import { adminInvitesController } from "../controllers/adminInvitesController";
 import { adminSampleDataController } from "../controllers/adminSampleDataController";
+import { registrationChangesController } from "../controllers/registrationChangesController";
 import { protect, requireAdmin } from "../middlewares/authMiddleware";
 
 export const adminRouter = express.Router();
@@ -208,3 +209,34 @@ const {
 adminRouter.get("/sample-data", sampleDataStatus);
 adminRouter.post("/sample-data", addSampleData);
 adminRouter.delete("/sample-data", removeSampleData);
+
+/**
+ * @openapi
+ * /admin/registration-changes:
+ *   get:
+ *     summary: The change log — edits to registrations after they were submitted
+ *     description: >
+ *       Newest first, 50 a page. Each entry has who made the edit (`by`:
+ *       devotee or team, with `byName`), the status at the time, and the
+ *       registration's details `before` and `after`.
+ *     tags: [Admin]
+ *     parameters:
+ *       - in: query
+ *         name: by
+ *         schema: { type: string, enum: [devotee, team] }
+ *       - in: query
+ *         name: q
+ *         schema: { type: string }
+ *         description: Matches the registration code or name, case-insensitive
+ *       - in: query
+ *         name: registration
+ *         schema: { type: string }
+ *         description: One registration's id
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *     responses:
+ *       200:
+ *         description: "`{ changes, total, page, pageSize }`"
+ */
+adminRouter.get("/registration-changes", registrationChangesController.list);

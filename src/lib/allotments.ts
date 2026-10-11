@@ -4,6 +4,10 @@ import { buildStayNotice, sameNotice, type StayNotice } from "./accommodation";
 import { wantsBed } from "./registrations";
 import { prisma } from "../utils/db";
 
+// PAUSED 2026-10-11 — per-person room allotment is switched off; rooms now go
+// to mandals (src/lib/mandal-stays.ts). Nothing calls these any more (see the
+// commented-out calls in registrationController.ts); kept to bring it back.
+
 /**
  * Keeps room allotments in step with the registration they belong to, after
  * any change to it:

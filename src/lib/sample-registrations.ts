@@ -9,7 +9,15 @@
  * Used by the admin toggle (adminSampleDataController) and by
  * `pnpm seed:registrations`.
  */
-import { EVENT_DAYS, MANDALS, STAY_DATES, formatRegistrationCode, type StayPoint } from "./event";
+import {
+  EVENT_DAYS,
+  MANDALS,
+  OVERSEAS_MANDALS,
+  STAY_DATES,
+  formatRegistrationCode,
+  isLocalMandal,
+  type StayPoint,
+} from "./event";
 import { prisma } from "../utils/db";
 
 type Gender = "male" | "female";
@@ -32,7 +40,6 @@ type SeedRegistration = {
   type: string;
   groupName?: string;
   mandal: string;
-  city: string;
   members: Member[];
   arrival: StayPoint;
   departure: StayPoint;
@@ -42,6 +49,12 @@ type SeedRegistration = {
     vehicleNumbers: string[];
     reference?: string;
     needsPickup: boolean;
+  };
+  indiaTravel?: {
+    needsPickup: boolean;
+    arrival: { date: string; time: string; flight: string } | null;
+    needsDrop: boolean;
+    departure: { date: string; time: string; flight: string } | null;
   };
   accommodationRequired: boolean;
   notes?: string;
@@ -143,8 +156,7 @@ const SURNAMES = [
 ];
 
 const PLATE_PREFIX: Record<string, string> = {
-  "Ahmedabad – Maninagar": "GJ-01",
-  "Ahmedabad – Naranpura": "GJ-01",
+  Ahmedabad: "GJ-01",
   Gandhinagar: "GJ-18",
   Surat: "GJ-05",
   Vadodara: "GJ-06",
@@ -166,11 +178,13 @@ const TRAINS = [
   "12933 Karnavati Exp",
 ];
 
-const ABROAD = new Set(["London (UK)", "New Jersey (USA)"]);
+const ABROAD = new Set(OVERSEAS_MANDALS);
 
-/** "Ahmedabad – Maninagar" → "Ahmedabad", "London (UK)" → "London". */
-function cityOfMandal(mandal: string) {
-  return mandal.split(" – ")[0].replace(/ \(.*\)$/, "");
+/** "2027-01-28" moved by `days`. */
+function shiftDate(iso: string, days: number) {
+  const date = new Date(`${iso}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 export function buildSampleRegistrations(): SeedRegistration[] {
@@ -194,21 +208,26 @@ export function buildSampleRegistrations(): SeedRegistration[] {
     return number;
   };
 
-  const stay = (date: string, slot: string): StayPoint => ({ date, slot });
+  // Most people take the meal served as they arrive or before they leave.
+  const stay = (date: string, slot: string): StayPoint => ({
+    date,
+    slot,
+    meal: chance(0.85),
+  });
 
   /** Most people come for the whole event; some come late or leave early. */
   const pickSchedule = (abroad: boolean): [StayPoint, StayPoint] => {
     const roll = rand();
     if (abroad || roll < 0.35) {
       return [
-        stay(STAY_DATES[0], pick(["evening", "night"] as const)),
+        stay(STAY_DATES[0], "evening"),
         stay(STAY_DATES[STAY_DATES.length - 1], pick(["morning", "afternoon"] as const)),
       ];
     }
     if (roll < 0.7) {
       return [
         stay(EVENT_DAYS[0], pick(["morning", "afternoon"] as const)),
-        stay(EVENT_DAYS[EVENT_DAYS.length - 1], pick(["evening", "night"] as const)),
+        stay(EVENT_DAYS[EVENT_DAYS.length - 1], "evening"),
       ];
     }
     // Event days only: comes late, leaves early, or both.
@@ -260,9 +279,8 @@ export function buildSampleRegistrations(): SeedRegistration[] {
     // Overseas mandals send a handful of people, not a fifth of the event.
     const mandal = chance(0.06) ? pick([...ABROAD]) : pick(MANDALS.filter(m => !ABROAD.has(m)));
     currentMandal = mandal;
-    const city = cityOfMandal(mandal);
     const abroad = ABROAD.has(mandal);
-    const local = mandal.startsWith("Ahmedabad") || mandal === "Gandhinagar";
+    const local = isLocalMandal(mandal);
     const schedule = pickSchedule(abroad);
     const surname = pick(SURNAMES);
 
@@ -348,7 +366,8 @@ export function buildSampleRegistrations(): SeedRegistration[] {
 
     let travelMode: TravelMode;
     if (abroad) travelMode = "flight";
-    else if (local) travelMode = chance(0.8) ? "personal_vehicle" : "public_bus";
+    // Nearby mandals are not asked; they come from home.
+    else if (local) travelMode = "local";
     else
       travelMode = pick([
         "personal_vehicle",
@@ -375,7 +394,6 @@ export function buildSampleRegistrations(): SeedRegistration[] {
       type,
       groupName,
       mandal,
-      city,
       members,
       arrival: schedule[0],
       departure: schedule[1],
@@ -399,7 +417,36 @@ export function buildSampleRegistrations(): SeedRegistration[] {
               : undefined,
         needsPickup: (travelMode === "train" || travelMode === "flight") && chance(0.7),
       },
-      accommodationRequired: local ? chance(0.15) : true,
+      // Most overseas devotees fly into Ahmedabad and want a pickup; fewer a drop.
+      indiaTravel:
+        abroad && chance(0.8)
+          ? (() => {
+              const needsPickup = chance(0.75);
+              const needsDrop = chance(0.5);
+              const time = () =>
+                `${String(between(0, 23)).padStart(2, "0")}:${pick(["00", "15", "30", "45"])}`;
+              const flight = () => `${pick(["AI", "BA", "EK", "QR", "UA"])} ${between(100, 999)}`;
+              return {
+                needsPickup,
+                arrival: needsPickup
+                  ? {
+                      date: shiftDate(schedule[0].date, -between(0, 3)),
+                      time: time(),
+                      flight: flight(),
+                    }
+                  : null,
+                needsDrop,
+                departure: needsDrop
+                  ? {
+                      date: shiftDate(schedule[1].date, between(0, 3)),
+                      time: time(),
+                      flight: flight(),
+                    }
+                  : null,
+              };
+            })()
+          : undefined,
+      accommodationRequired: !local,
       notes: chance(0.15)
         ? pick([
             "Will help with seva in the kitchen if needed.",
@@ -490,6 +537,8 @@ export async function insertSampleRegistrations() {
 export async function removeSampleRegistrations() {
   const samples = await prisma.registration.findMany({ where: { isSample: true }, select: { id: true } });
   await prisma.roomAllotment.deleteMany({ where: { registrationId: { in: samples.map((s) => s.id) } } });
+  // Their entries on the Logs screen go with them.
+  await prisma.registrationChange.deleteMany({ where: { registrationId: { in: samples.map((s) => s.id) } } });
   const { count } = await prisma.registration.deleteMany({ where: { isSample: true } });
   return count;
 }

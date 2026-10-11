@@ -5,39 +5,112 @@ import { protect, requireAdmin, requireReviewer, requireStaff } from "../middlew
 
 export const accommodationRouter = express.Router();
 
-const { overview, createPlace, updatePlace, deletePlace, allot, release, sendNotice, sendAllNotices } =
-  accommodationController;
+const {
+  overview,
+  createPlace,
+  updatePlace,
+  deletePlace,
+  createMandalStay,
+  updateMandalStay,
+  deleteMandalStay,
+  updateOccupancy,
+} = accommodationController;
+// PAUSED 2026-10-11 — per-person allotment; its routes are commented out below.
+// const { allotmentOverview, allot, release, sendNotice, sendAllNotices } = accommodationController;
 
 /**
  * @openapi
  * tags:
  *   name: Accommodation
  *   description: >
- *     Places and rooms, who sleeps where, and sending devotees their room
- *     details. Desk roles read; staff and admins allot; admins edit places.
+ *     Places and rooms, and which rooms each mandal was given. Desk roles
+ *     read; staff and admins give rooms to mandals; the mandal's sanchalak,
+ *     staff and admins report occupancy; admins edit places.
  */
 
-// Devotees' names and rooms: the desk only, and a sanchalak only for their mandal.
+// The desk only, and a sanchalak only for their mandal.
 accommodationRouter.use(protect, requireStaff);
 
 /**
  * @openapi
  * /accommodation:
  *   get:
- *     summary: Places, allotments and room-detail notices
+ *     summary: Places and the rooms given to mandals
  *     description: >
- *       Every place with its rooms, every allotment the viewer may see (one
- *       mandal's for a sanchalak), and for each registration with rooms when
- *       its details were sent and whether they are still right.
+ *       Every place with its rooms, and every mandal's rooms the viewer may
+ *       see (only their own mandal's for a sanchalak), with occupancy.
  *     tags: [Accommodation]
  *     responses:
  *       200:
- *         description: "`{ places, allotments, notices, whatsApp }`"
+ *         description: "`{ places, mandalStays }`"
  */
 accommodationRouter.get("/", overview);
 
 /**
  * @openapi
+ * /accommodation/mandal-stays:
+ *   post:
+ *     summary: Give a mandal rooms at a place
+ *     description: >
+ *       `{ placeId, mandal, coordinatorName, coordinatorMobile, notes?, roomIds }`.
+ *       One entry per mandal per place; a room belongs to one mandal at most.
+ *     tags: [Accommodation]
+ *     responses:
+ *       201:
+ *         description: The mandal's rooms
+ *       409:
+ *         description: ROOM_TAKEN, MANDAL_TAKEN or ROOM_GONE
+ */
+accommodationRouter.post("/mandal-stays", requireReviewer, createMandalStay);
+
+/**
+ * @openapi
+ * /accommodation/mandal-stays/{id}:
+ *   patch:
+ *     summary: Change a mandal's rooms or coordinator
+ *     description: Same body as POST. Occupancy of rooms taken back is dropped.
+ *     tags: [Accommodation]
+ *     responses:
+ *       200:
+ *         description: The mandal's rooms
+ *       409:
+ *         description: ROOM_TAKEN, MANDAL_TAKEN or ROOM_GONE
+ *   delete:
+ *     summary: Take back all of a mandal's rooms at a place
+ *     tags: [Accommodation]
+ *     responses:
+ *       200:
+ *         description: Taken back
+ */
+accommodationRouter.patch("/mandal-stays/:id", requireReviewer, updateMandalStay);
+accommodationRouter.delete("/mandal-stays/:id", requireReviewer, deleteMandalStay);
+
+/**
+ * @openapi
+ * /accommodation/mandal-stays/{id}/occupancy:
+ *   put:
+ *     summary: Report how many people are in each of a mandal's rooms
+ *     description: >
+ *       `{ rooms: [{ roomId, people }] }`. Staff and admins for any mandal, a
+ *       sanchalak for their own. Rooms left out keep what they had.
+ *     tags: [Accommodation]
+ *     responses:
+ *       200:
+ *         description: The mandal's rooms
+ */
+accommodationRouter.put("/mandal-stays/:id/occupancy", updateOccupancy);
+
+// ---------------------------------------------------------------------------
+// PAUSED 2026-10-11 — per-person allotment and room-detail notices. Rooms now
+// go to mandals (above). Uncomment these, and the destructuring at the top,
+// to bring it back; the frontend screens are in
+// upasana-fe/src/features/accommodation/paused/.
+// ---------------------------------------------------------------------------
+
+// accommodationRouter.get("/allotments", allotmentOverview);
+
+/**
+ * (paused; not in the API docs)
  * /accommodation/allotments:
  *   post:
  *     summary: Put people in a room
@@ -55,10 +128,10 @@ accommodationRouter.get("/", overview);
  *       409:
  *         description: NOT_CONFIRMED, NO_STAY_REQUESTED, NO_NIGHTS or ROOM_PROBLEM
  */
-accommodationRouter.post("/allotments", requireReviewer, allot);
+// accommodationRouter.post("/allotments", requireReviewer, allot);
 
 /**
- * @openapi
+ * (paused; not in the API docs)
  * /accommodation/allotments/release:
  *   post:
  *     summary: Take people out of their rooms
@@ -68,10 +141,10 @@ accommodationRouter.post("/allotments", requireReviewer, allot);
  *       200:
  *         description: The registration's remaining allotments
  */
-accommodationRouter.post("/allotments/release", requireReviewer, release);
+// accommodationRouter.post("/allotments/release", requireReviewer, release);
 
 /**
- * @openapi
+ * (paused; not in the API docs)
  * /accommodation/registrations/{id}/notice:
  *   post:
  *     summary: Send a registration its room details on WhatsApp
@@ -87,10 +160,10 @@ accommodationRouter.post("/allotments/release", requireReviewer, release);
  *       502:
  *         description: SEND_FAILED
  */
-accommodationRouter.post("/registrations/:id/notice", requireReviewer, sendNotice);
+// accommodationRouter.post("/registrations/:id/notice", requireReviewer, sendNotice);
 
 /**
- * @openapi
+ * (paused; not in the API docs)
  * /accommodation/notices/send-all:
  *   post:
  *     summary: Send room details to everyone fully allotted and not yet told
@@ -101,7 +174,7 @@ accommodationRouter.post("/registrations/:id/notice", requireReviewer, sendNotic
  *       503:
  *         description: WHATSAPP_NOT_CONFIGURED
  */
-accommodationRouter.post("/notices/send-all", requireReviewer, sendAllNotices);
+// accommodationRouter.post("/notices/send-all", requireReviewer, sendAllNotices);
 
 /**
  * @openapi
@@ -122,7 +195,7 @@ accommodationRouter.post("/places", requireAdmin, createPlace);
  * /accommodation/places/{id}:
  *   patch:
  *     summary: Change a place and its rooms (admin)
- *     description: Rooms with people in them cannot be removed or made too small for them.
+ *     description: Rooms given to a mandal cannot be removed until they are taken back.
  *     tags: [Accommodation]
  *     responses:
  *       200:
@@ -130,7 +203,7 @@ accommodationRouter.post("/places", requireAdmin, createPlace);
  *       409:
  *         description: ROOM_IN_USE or NAME_TAKEN
  *   delete:
- *     summary: Remove an empty place (admin)
+ *     summary: Remove a place no mandal has rooms at (admin)
  *     tags: [Accommodation]
  *     responses:
  *       200:

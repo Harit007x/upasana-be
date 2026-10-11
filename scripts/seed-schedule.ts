@@ -1,5 +1,5 @@
 /**
- * Fills in a placeholder programme for 1–5 Jan 2027, so the schedule screen
+ * Fills in a placeholder programme for 28 Jan – 1 Feb 2027, so the schedule screen
  * has something to show and edit before the committee confirms timings.
  *
  *   pnpm seed:schedule           only when there are no days yet
@@ -63,16 +63,16 @@ function day(
 }
 
 const DAYS = [
-  day("2027-01-01", {
+  day("2027-01-28", {
     theme: "Opening day",
     morningSabha: "Udghatan Sabha",
     morningNote: "Inauguration with deep pragatya and welcome addresses.",
     culturalNote: "Welcome performances by the host mandal.",
   }),
-  day("2027-01-02", { culturalNote: "Natak by the Surat and Vadodara mandals." }),
-  day("2027-01-03", { cultural: "Bhakti Sangeet Sandhya" }),
-  day("2027-01-04", { culturalNote: "Inter-mandal performances." }),
-  day("2027-01-05", {
+  day("2027-01-29", { culturalNote: "Natak by the Surat and Vadodara mandals." }),
+  day("2027-01-30", { cultural: "Bhakti Sangeet Sandhya" }),
+  day("2027-01-31", { culturalNote: "Inter-mandal performances." }),
+  day("2027-02-01", {
     theme: "Closing day",
     eveningSabha: "Samapan Sabha",
     eveningNote: "Closing sabha and vote of thanks.",

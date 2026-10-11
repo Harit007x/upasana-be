@@ -302,13 +302,14 @@ model Registration {
   /// `groupName` from when groups were a type; kept to avoid a data migration.
   groupName String?
   mandal    String
-  city      String
 
-  members   RegistrationMember[]
+  members     RegistrationMember[]
   /// The booking spans from the first member in to the last member out.
-  arrival   StayPoint
-  departure StayPoint
-  travel    Travel
+  arrival     StayPoint
+  departure   StayPoint
+  travel      Travel
+  /// Devotees from abroad only, when they filled any of it in.
+  indiaTravel IndiaTravel?
 
   accommodationRequired Boolean
   notes                 String?
@@ -388,11 +389,36 @@ type RegistrationMember {
   needsAccommodation Boolean?
 }
 
-/// A calendar day at the venue ("2027-01-30") and a rough time of day.
+/// A calendar day at the venue ("2027-01-28") and a rough time of day.
 type StayPoint {
   date String
-  /// "morning" | "afternoon" | "evening" | "night"
+  /// "morning" | "afternoon" | "evening"
   slot String
+  /// Whether they take the meal served in that slot (breakfast, lunch or
+  /// dinner): on arrival the first meal here, on leaving the last. Null on
+  /// registrations from before it was asked.
+  meal Boolean?
+}
+
+/// For devotees from abroad: a pickup from and a drop to Ahmedabad airport,
+/// the only airport the transport team covers. Asked, optionally, on the
+/// first step when the mandal is overseas.
+type IndiaTravel {
+  needsPickup Boolean
+  /// The flight they land on; with `needsPickup`.
+  arrival     IndiaFlight?
+  needsDrop   Boolean
+  /// The flight they leave on; with `needsDrop`.
+  departure   IndiaFlight?
+}
+
+/// A flight into or out of Ahmedabad airport.
+type IndiaFlight {
+  /// ISO calendar day, e.g. "2027-01-24".
+  date   String
+  /// 24-hour local time, e.g. "06:30", when known.
+  time   String?
+  flight String?
 }
 
 type Travel {
@@ -465,6 +491,52 @@ type AccommodationRoom {
   floor     Int
 }
 
+/// Rooms at a place handed to one mandal. The mandal's coordinator decides who
+/// sleeps where and reports how many people are in each room; the team only
+/// sees those numbers. Replaced per-person allotment (`RoomAllotment`) on
+/// 2026-10-11.
+///
+/// Staff and admins give and take back rooms; the coordinator's sanchalak
+/// (same mandal), staff and admins update the occupancy. A room belongs to at
+/// most one mandal — checked inside a transaction that bumps the place's
+/// `version`, like the allotments were.
+model MandalStay {
+  id      String @id @default(auto()) @map("_id") @db.ObjectId
+  placeId String @db.ObjectId
+  /// One of MANDALS.
+  mandal  String
+
+  coordinatorName   String
+  /// E.164.
+  coordinatorMobile String
+  notes             String?
+
+  /// `AccommodationRoom.id`s in the place.
+  roomIds   String[]
+  /// People in each room, as the coordinator last reported. A room missing
+  /// here has not been reported yet.
+  occupancy RoomOccupancy[]
+
+  occupancyUpdatedAt     DateTime?
+  occupancyUpdatedByName String?
+
+  createdByName String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([placeId, mandal])
+  @@index([mandal])
+  @@map("mandal_stay")
+}
+
+type RoomOccupancy {
+  roomId String
+  people Int
+}
+
+/// PAUSED 2026-10-11 — per-person allotment is switched off (rooms now go to
+/// mandals, see `MandalStay`). Kept so the feature and its data can come back.
+///
 /// One person's bed: a member of a registration, in a room. Their nights come
 /// from the member's own arrival and departure, so the same bed can go to
 /// someone else on other nights.
@@ -549,4 +621,96 @@ model SchedulePublication {
 
   @@index([publishedAt])
   @@map("schedule_publication")
+}
+
+/// A host's walk-in guests: friends or family a devotee invites to come for
+/// the day — to attend and to eat — without registering or staying. Filled in
+/// by the host on the public /guests/register link (shared only with selected
+/// people), or by the team at the desk.
+///
+/// Counted, not named one by one: the kitchen needs how many plates each day,
+/// not who. Each entry is one host's party; a host with two separate parties
+/// sends the form twice.
+model GuestVisit {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  /// Whose guests they are: the devotee who invited them.
+  hostName   String
+  /// E.164. Not verified: it is how the team reaches the host, nothing more.
+  hostMobile String
+  /// The host's mandal (or "Not in a mandal"). A sanchalak sees their own.
+  hostMandal String
+
+  /// Optional: the guests' names, as the host wrote them.
+  guestNames String?
+  /// The days they come, in date order, one entry per day.
+  days       GuestDay[]
+  notes      String?
+
+  /// "self" from the public link, "staff" from the desk (`createdById`).
+  source      String
+  createdById String? @db.ObjectId
+
+  /// The last change by the team, and who made it.
+  editedAt     DateTime?
+  editedByName String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([hostMandal])
+  @@index([hostMobile])
+  @@index([createdAt])
+  @@map("guest_visit")
+}
+
+/// One day a host's guests come.
+type GuestDay {
+  /// An event day, e.g. "2027-01-29".
+  date   String
+  /// How many people come that day.
+  guests Int
+  /// The meals they take that day: "lunch", "dinner". Empty: they only attend.
+  meals  String[]
+}
+
+/// One saved edit to a registration after it was submitted: who made it, and
+/// the registration's details just before and just after. Written by
+/// `recordChange` (src/lib/registration-changes.ts) on every edit that changed
+/// something — a devotee's own at /register/edit, or the team's at the desk.
+/// Admins read them on the Logs screen (/admin/logs).
+///
+/// The two snapshots are stored whole, in the shape the frontend reads
+/// (`toRegistrationDto`, details only), and compared there — so how a change
+/// is described can improve without touching old entries. The code, name and
+/// mandal are copied in so an entry still reads well if the registration is
+/// later removed.
+model RegistrationChange {
+  id             String @id @default(auto()) @map("_id") @db.ObjectId
+  registrationId String @db.ObjectId
+  code           String
+  /// The family name, else the primary contact's name — after the edit.
+  name           String
+  mandal         String
+
+  /// "devotee" (online, after an OTP on the contact number) or "team" (a
+  /// signed-in staff member, sanchalak or admin at the desk).
+  by       String
+  /// The team member's name; null for the devotee.
+  byName   String?
+  byUserId String? @db.ObjectId
+
+  /// The registration's status when the edit was saved. Edits never change it.
+  status String
+
+  /// The details before and after: `RegistrationDetails` in the frontend.
+  before Json
+  after  Json
+
+  createdAt DateTime @default(now())
+
+  @@index([registrationId])
+  @@index([by])
+  @@index([createdAt])
+  @@map("registration_change")
 }

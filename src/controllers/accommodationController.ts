@@ -22,18 +22,30 @@ import {
   type StayNotice,
 } from "../lib/accommodation";
 import { EVENT_NAME } from "../lib/event";
+import {
+  mandalStayInputSchema,
+  occupancyFor,
+  occupancyInputSchema,
+  toMandalStayDto,
+} from "../lib/mandal-stays";
 import { wantsBed } from "../lib/registrations";
 import { WHATSAPP_TEMPLATES, isWhatsAppConfigured, sendWhatsAppTemplate } from "../lib/whatsapp";
 import { registrationScope } from "../middlewares/authMiddleware";
 import { prisma } from "../utils/db";
 
 /**
- * Accommodation: places and their rooms, who sleeps where, and telling them.
+ * Accommodation: places and their rooms, and which rooms each mandal was
+ * given (src/lib/mandal-stays.ts). The mandal's coordinator decides who
+ * sleeps where and reports how many people are in each room.
  *
  * Every desk role reads (`overview`), a sanchalak only their own mandal's
- * people. The seva team (staff, admin) allots, releases and sends room
- * details; only admins add or change places. See src/lib/accommodation.ts for
- * the rules.
+ * rooms. Staff and admins give rooms to mandals; they and the mandal's
+ * sanchalak update the occupancy; only admins add or change places.
+ *
+ * PAUSED 2026-10-11: per-person allotment — `allotmentOverview`, `allot`,
+ * `release`, `sendNotice`, `sendAllNotices` below. Their routes are commented
+ * out in accommodationRoutes.ts; the code is kept so it can come back. See
+ * src/lib/accommodation.ts for its rules.
  */
 
 const isObjectId = (id: string) => /^[a-f\d]{24}$/i.test(id);
@@ -96,11 +108,30 @@ function noticeState(registration: Registration, current: StayNotice | null) {
 }
 
 /**
+ * Everything the Accommodation screens need in one go: places with their
+ * rooms, and the rooms given to mandals — every mandal's for staff and
+ * admins, only their own for a sanchalak.
+ */
+const overview = async (req: Request, res: Response): Promise<void> => {
+  const scope = registrationScope(req.user);
+  const [places, mandalStays] = await Promise.all([
+    prisma.accommodationPlace.findMany(byOrder),
+    prisma.mandalStay.findMany({ where: scope, orderBy: { mandal: "asc" } }),
+  ]);
+  res.status(200).json({
+    success: true,
+    data: { places: places.map(toPlaceDto), mandalStays: mandalStays.map(toMandalStayDto) },
+  });
+};
+
+/**
+ * PAUSED 2026-10-11 (per-person allotment). Was `GET /accommodation`.
+ *
  * Everything the Accommodation screens need in one go: places with rooms,
  * every allotment the viewer may see, and for each registration with rooms
  * whether its room details were sent and are still right.
  */
-const overview = async (req: Request, res: Response): Promise<void> => {
+const allotmentOverview = async (req: Request, res: Response): Promise<void> => {
   const scope = registrationScope(req.user);
   const scoped = "mandal" in scope;
 
@@ -160,10 +191,9 @@ const createPlace = async (req: Request, res: Response): Promise<void> => {
 };
 
 /**
- * Changes a place's details and rooms. A room with people in it cannot be
- * removed, and cannot be changed into something they no longer fit — fewer
- * beds than people on some night, or a gents room with a woman in it. The
- * team moves them first; nobody is moved silently.
+ * Changes a place's details and rooms. A room given to a mandal cannot be
+ * removed — take it back from the mandal first — but its beds, type and
+ * floor can change: the coordinator works within whatever the room is.
  */
 const updatePlace = async (req: Request, res: Response): Promise<void> => {
   const id = String(req.params.id);
@@ -184,28 +214,45 @@ const updatePlace = async (req: Request, res: Response): Promise<void> => {
           existing.rooms.map(r => r.id)
         );
 
-        const allotments = await tx.roomAllotment.findMany({ where: { placeId: id } });
-        const registrations = new Map(
-          (
-            await tx.registration.findMany({
-              where: { id: { in: [...new Set(allotments.map(a => a.registrationId))] } },
-            })
-          ).map(r => [r.id, r])
-        );
+        const stays = await tx.mandalStay.findMany({ where: { placeId: id } });
         for (const old of existing.rooms) {
-          const inRoom = allotments.filter(a => a.roomId === old.id);
-          if (inRoom.length === 0) continue;
-          const now = rooms.find(r => r.id === old.id);
-          if (!now) {
+          if (rooms.some(r => r.id === old.id)) continue;
+          const holder = stays.find(st => st.roomIds.includes(old.id));
+          if (holder) {
             throw new Refusal(
               409,
               "ROOM_IN_USE",
-              `Room ${old.label} has people in it — move them to another room first.`
+              `Room ${old.label} is given to ${holder.mandal} — take it back from them first.`
             );
           }
-          const problem = roomProblem(now, occupantsOf(inRoom, registrations));
-          if (problem) throw new Refusal(409, "ROOM_IN_USE", `${problem}. Move someone out first.`);
         }
+
+        // PAUSED 2026-10-11 (per-person allotment): a room with people
+        // allotted to it could not be removed or changed into something they
+        // no longer fit.
+        //
+        // const allotments = await tx.roomAllotment.findMany({ where: { placeId: id } });
+        // const registrations = new Map(
+        //   (
+        //     await tx.registration.findMany({
+        //       where: { id: { in: [...new Set(allotments.map(a => a.registrationId))] } },
+        //     })
+        //   ).map(r => [r.id, r])
+        // );
+        // for (const old of existing.rooms) {
+        //   const inRoom = allotments.filter(a => a.roomId === old.id);
+        //   if (inRoom.length === 0) continue;
+        //   const now = rooms.find(r => r.id === old.id);
+        //   if (!now) {
+        //     throw new Refusal(
+        //       409,
+        //       "ROOM_IN_USE",
+        //       `Room ${old.label} has people in it — move them to another room first.`
+        //     );
+        //   }
+        //   const problem = roomProblem(now, occupantsOf(inRoom, registrations));
+        //   if (problem) throw new Refusal(409, "ROOM_IN_USE", `${problem}. Move someone out first.`);
+        // }
 
         return tx.accommodationPlace.update({
           where: { id },
@@ -239,18 +286,178 @@ const deletePlace = async (req: Request, res: Response): Promise<void> => {
     return void res
       .status(404)
       .json({ success: false, code: "NOT_FOUND", message: "Place not found" });
-  const used = await prisma.roomAllotment.count({ where: { placeId: id } });
-  if (used > 0) {
+  const stays = await prisma.mandalStay.findMany({ where: { placeId: id }, select: { mandal: true } });
+  if (stays.length > 0) {
     res.status(409).json({
       success: false,
       code: "PLACE_IN_USE",
-      message: `${used} ${used === 1 ? "person is" : "people are"} staying at ${place.name}. Move them before removing it.`,
+      message: `Rooms at ${place.name} are given to ${stays.map(st => st.mandal).join(", ")}. Take them back before removing it.`,
     });
     return;
   }
+  // PAUSED 2026-10-11 (per-person allotment): refused while anyone was allotted here.
+  // const used = await prisma.roomAllotment.count({ where: { placeId: id } });
+  // if (used > 0) {
+  //   res.status(409).json({
+  //     success: false,
+  //     code: "PLACE_IN_USE",
+  //     message: `${used} ${used === 1 ? "person is" : "people are"} staying at ${place.name}. Move them before removing it.`,
+  //   });
+  //   return;
+  // }
   await prisma.accommodationPlace.delete({ where: { id } });
   res.status(200).json({ success: true, data: { id } });
 };
+
+/**
+ * Saves a mandal's rooms at a place: new (no id) or changed. Inside a
+ * transaction that writes the place first, so two team members giving away
+ * the same room at once cannot both succeed. A room another mandal has is
+ * refused; occupancy reported for a room the mandal no longer has is dropped.
+ */
+async function saveMandalStay(req: Request, res: Response, id?: string) {
+  const parsed = mandalStayInputSchema.safeParse(req.body);
+  if (!parsed.success) return validationError(res, parsed.error.issues);
+  const input = parsed.data;
+
+  try {
+    const stay = await withRetry(() =>
+      prisma.$transaction(async tx => {
+        const existing = id ? await tx.mandalStay.findUnique({ where: { id } }) : null;
+        if (id && !existing) throw new Refusal(404, "NOT_FOUND", "Those rooms were already taken back.");
+        // Moving a mandal's rooms to another place is a new entry there.
+        if (existing && existing.placeId !== input.placeId) {
+          throw new Refusal(400, "PLACE_CHANGED", "Rooms can't move to another place. Add them there instead.");
+        }
+
+        const place = await tx.accommodationPlace
+          .update({ where: { id: input.placeId }, data: { version: { increment: 1 } } })
+          .catch((error: unknown) => {
+            if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+              throw new Refusal(404, "NOT_FOUND", "That place no longer exists. Reload and try again.");
+            }
+            throw error;
+          });
+
+        const unknown = input.roomIds.filter(roomId => !place.rooms.some(r => r.id === roomId));
+        if (unknown.length > 0) {
+          throw new Refusal(409, "ROOM_GONE", "A room you picked was removed from the place. Reload and try again.");
+        }
+        const others = await tx.mandalStay.findMany({
+          where: { placeId: input.placeId, ...(id ? { id: { not: id } } : {}) },
+        });
+        const sameMandal = others.find(o => o.mandal === input.mandal);
+        if (sameMandal) {
+          throw new Refusal(
+            409,
+            "MANDAL_TAKEN",
+            `${input.mandal} already has rooms at ${place.name}. Change those instead.`
+          );
+        }
+        const label = (roomId: string) => place.rooms.find(r => r.id === roomId)?.label ?? roomId;
+        for (const other of others) {
+          const clash = input.roomIds.filter(roomId => other.roomIds.includes(roomId));
+          if (clash.length > 0) {
+            throw new Refusal(
+              409,
+              "ROOM_TAKEN",
+              `${clash.length === 1 ? "Room" : "Rooms"} ${clash.map(label).join(", ")} ${clash.length === 1 ? "is" : "are"} already given to ${other.mandal}.`
+            );
+          }
+        }
+
+        const data = {
+          mandal: input.mandal,
+          coordinatorName: input.coordinatorName,
+          coordinatorMobile: input.coordinatorMobile,
+          notes: input.notes,
+          roomIds: input.roomIds,
+        };
+        return existing
+          ? tx.mandalStay.update({
+              where: { id: existing.id },
+              data: { ...data, occupancy: occupancyFor(input.roomIds, existing.occupancy) },
+            })
+          : tx.mandalStay.create({
+              data: { ...data, placeId: input.placeId, occupancy: [], createdByName: req.user.name },
+            });
+      })
+    );
+    res.status(id ? 200 : 201).json({ success: true, data: toMandalStayDto(stay) });
+  } catch (error) {
+    if (error instanceof Refusal) return void refuse(res, error);
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      res.status(409).json({
+        success: false,
+        code: "MANDAL_TAKEN",
+        message: `${input.mandal} already has rooms at this place. Change those instead.`,
+      });
+      return;
+    }
+    throw error;
+  }
+}
+
+const createMandalStay = (req: Request, res: Response) => saveMandalStay(req, res);
+
+const updateMandalStay = async (req: Request, res: Response): Promise<void> => {
+  const id = String(req.params.id);
+  if (!isObjectId(id))
+    return void res.status(404).json({ success: false, code: "NOT_FOUND", message: "Not found" });
+  await saveMandalStay(req, res, id);
+};
+
+/** Takes every room back from a mandal at a place, with its occupancy. */
+const deleteMandalStay = async (req: Request, res: Response): Promise<void> => {
+  const id = String(req.params.id);
+  const deleted = isObjectId(id)
+    ? await prisma.mandalStay.deleteMany({ where: { id } })
+    : { count: 0 };
+  if (deleted.count === 0)
+    return void res.status(404).json({ success: false, code: "NOT_FOUND", message: "Already taken back" });
+  res.status(200).json({ success: true, data: { id } });
+};
+
+/**
+ * The coordinator's report: how many people are in each of the mandal's
+ * rooms. Staff and admins for any mandal; a sanchalak only for their own.
+ * Every room the mandal has may be sent, and replaces what was there.
+ */
+const updateOccupancy = async (req: Request, res: Response): Promise<void> => {
+  const id = String(req.params.id);
+  const stay = isObjectId(id)
+    ? await prisma.mandalStay.findFirst({ where: { id, ...registrationScope(req.user) } })
+    : null;
+  if (!stay)
+    return void res.status(404).json({ success: false, code: "NOT_FOUND", message: "Not found" });
+  const parsed = occupancyInputSchema.safeParse(req.body);
+  if (!parsed.success) return validationError(res, parsed.error.issues);
+
+  const reported = new Map(parsed.data.rooms.map(r => [r.roomId, r.people]));
+  if ([...reported.keys()].some(roomId => !stay.roomIds.includes(roomId))) {
+    res.status(409).json({
+      success: false,
+      code: "ROOM_GONE",
+      message: "A room was taken back from the mandal meanwhile. Reload and try again.",
+    });
+    return;
+  }
+  // Rooms not sent keep what they had.
+  const occupancy = stay.roomIds.flatMap(roomId => {
+    const people = reported.get(roomId) ?? stay.occupancy.find(o => o.roomId === roomId)?.people;
+    return people === undefined ? [] : [{ roomId, people }];
+  });
+  const saved = await prisma.mandalStay.update({
+    where: { id },
+    data: { occupancy, occupancyUpdatedAt: new Date(), occupancyUpdatedByName: req.user.name },
+  });
+  res.status(200).json({ success: true, data: toMandalStayDto(saved) });
+};
+
+// ---------------------------------------------------------------------------
+// PAUSED 2026-10-11: per-person allotment and room-detail notices. Nothing
+// routes here any more (see accommodationRoutes.ts); kept to bring it back.
+// ---------------------------------------------------------------------------
 
 const assignment = z.object({
   memberId: z.string().max(40),
@@ -627,6 +834,12 @@ export const accommodationController = {
   createPlace,
   updatePlace,
   deletePlace,
+  createMandalStay,
+  updateMandalStay,
+  deleteMandalStay,
+  updateOccupancy,
+  // Paused per-person allotment.
+  allotmentOverview,
   allot,
   release,
   sendNotice,

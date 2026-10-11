@@ -20,11 +20,17 @@ export function roleDescription(role: string, mandal?: string | null) {
 /** Shown in WhatsApp messages. Matches `EVENT.name` on the frontend. */
 export const EVENT_NAME = "Youth Convention 2026";
 
-/** The event days, 30 Jan – 1 Feb 2027. Calendar days at the venue, no time zone. */
-export const EVENT_DAYS = ["2027-01-30", "2027-01-31", "2027-02-01"] as const;
+/** The event days, 28 Jan – 1 Feb 2027. Calendar days at the venue, no time zone. */
+export const EVENT_DAYS = [
+  "2027-01-28",
+  "2027-01-29",
+  "2027-01-30",
+  "2027-01-31",
+  "2027-02-01",
+] as const;
 
-/** Days a guest may arrive or leave: one either side of the event. */
-export const STAY_DATES = ["2027-01-29", ...EVENT_DAYS, "2027-02-02"] as const;
+/** Days a guest may arrive or leave: the event days only. */
+export const STAY_DATES = EVENT_DAYS;
 
 /**
  * Nights someone can need a bed: every stay date but the last, since nobody
@@ -40,11 +46,15 @@ export function formatDay(iso: string) {
   );
 }
 
-export const TIME_SLOTS = ["morning", "afternoon", "evening", "night"] as const;
+export const TIME_SLOTS = ["morning", "afternoon", "evening"] as const;
+
+/** Mandals outside India. Mirrors OVERSEAS_MANDALS on the frontend. */
+export const OVERSEAS_MANDALS: readonly string[] = ["London (UK)", "New Jersey (USA)"];
 
 export const MANDALS = [
-  "Ahmedabad – Maninagar",
-  "Ahmedabad – Naranpura",
+  "Ahmedabad",
+  "Dahegam",
+  "Naroda",
   "Gandhinagar",
   "Surat",
   "Vadodara",
@@ -60,6 +70,15 @@ export const MANDALS = [
 ] as const;
 
 export const NO_MANDAL = "Not in a mandal";
+
+/**
+ * Mandals near enough to come and go from home: Ahmedabad, and
+ * these. Not asked about travel or a bed; stored as travel "local", no beds.
+ * Mirrors isLocalMandal in upasana-fe/src/config/event.ts.
+ */
+const LOCAL_MANDALS: readonly string[] = ["Dahegam", "Naroda", "Gandhinagar", "Vadodara", "Rajkot"];
+export const isLocalMandal = (mandal: string) =>
+  mandal.startsWith("Ahmedabad") || LOCAL_MANDALS.includes(mandal);
 
 export const REGISTRATION_TYPES = ["individual", "family"] as const;
 export const GENDERS = ["male", "female"] as const;
@@ -105,6 +124,8 @@ export const TRAVEL_MODES = [
   "flight",
   "public_bus",
   "other",
+  // Set for local mandals, never picked.
+  "local",
 ] as const;
 export const REGISTRATION_STATUSES = ["pending", "confirmed", "checked_in", "cancelled"] as const;
 
@@ -114,7 +135,7 @@ export const REGISTRATION_STATUSES = ["pending", "confirmed", "checked_in", "can
  */
 export const MOBILE_E164 = /^(\+91[6-9]\d{9}|\+1\d{10}|\+44\d{10})$/;
 
-export type StayPoint = { date: string; slot: string };
+export type StayPoint = { date: string; slot: string; meal?: boolean | null };
 
 /** Negative when `a` comes first. ISO dates compare correctly as strings. */
 export function compareStay(a: StayPoint, b: StayPoint) {

@@ -9,6 +9,10 @@ import { wantsBed } from "./registrations";
  * Where devotees stay: places (guest houses, later hotels) with rooms, and one
  * allotment per person.
  *
+ * PAUSED 2026-10-11: per-person allotment (the room rules, notices) is
+ * switched off — rooms now go to mandals, see src/lib/mandal-stays.ts. The
+ * place and room schemas here are still live.
+ *
  * A person's nights come from their own arrival and departure, so a bed freed
  * after the first night can go to someone arriving for the second. The rules
  * for who may share a room (`roomProblem`) are mirrored in the frontend's

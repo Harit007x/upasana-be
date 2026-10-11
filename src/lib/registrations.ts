@@ -9,6 +9,7 @@ import {
   MAX_VEHICLES,
   MIN_FAMILY_CONTACT_AGE,
   NO_MANDAL,
+  OVERSEAS_MANDALS,
   RELATION_GENDER,
   REGISTRATION_STATUSES,
   REGISTRATION_TYPES,
@@ -16,6 +17,7 @@ import {
   TIME_SLOTS,
   TRAVEL_MODES,
   compareStay,
+  isLocalMandal,
   isVehiclePlate,
   maxVehiclesFor,
   normalizePlate,
@@ -32,8 +34,10 @@ import {
  */
 
 const stayPoint = z.object({
-  date: z.enum(STAY_DATES, { error: "Pick a day between 29 January and 2 February" }),
+  date: z.enum(STAY_DATES, { error: "Pick a day between 28 January and 1 February" }),
   slot: z.enum(TIME_SLOTS, { error: "Pick a time of day" }),
+  // Whether they take the meal served then: breakfast, lunch or dinner.
+  meal: z.boolean({ error: "Say whether you will take the meal" }),
 });
 
 const text = (max: number) => z.string().trim().max(max);
@@ -42,6 +46,39 @@ const optionalText = (max: number) =>
     .optional()
     .nullable()
     .transform(v => (v ? v : null));
+
+/** A flight into or out of Ahmedabad airport: the day, and the time and number if known. */
+const indiaFlight = z
+  .object({
+    date: z.iso.date({ error: "Enter a valid date" }),
+    time: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Enter a time like 06:30")
+      .optional(),
+    flight: text(20).optional(),
+  })
+  .optional();
+
+/**
+ * A pickup from and a drop to Ahmedabad airport, for devotees from abroad.
+ * Both optional; each one asked for needs its flight.
+ */
+const indiaTravel = z
+  .object({
+    needsPickup: z.boolean(),
+    arrival: indiaFlight,
+    needsDrop: z.boolean(),
+    departure: indiaFlight,
+  })
+  .refine(t => !t.needsPickup || t.arrival, {
+    message: "Pick the day you land",
+    path: ["arrival", "date"],
+  })
+  .refine(t => !t.needsDrop || t.departure, {
+    message: "Pick the day you fly out",
+    path: ["departure", "date"],
+  })
+  .optional();
 
 const member = z.object({
   /** The person's id from an earlier save, when editing; empty for someone new. */
@@ -74,7 +111,6 @@ export const newRegistrationSchema = z
     type: z.enum(REGISTRATION_TYPES, { error: "Choose individual or family" }),
     groupName: optionalText(120),
     mandal: z.enum([...MANDALS, NO_MANDAL], { error: "Select a mandal from the list" }),
-    city: text(80).min(2, "Enter the city"),
     // A cap well above any real party, so one request cannot store megabytes.
     members: z.array(member).min(1).max(100),
     arrival: stayPoint,
@@ -102,6 +138,7 @@ export const newRegistrationSchema = z
         .optional()
         .transform(v => v ?? false),
     }),
+    indiaTravel,
     accommodationRequired: z.boolean(),
     notes: optionalText(1000),
     /**
@@ -162,6 +199,10 @@ export const newRegistrationSchema = z
         `A family's primary contact has to be ${MIN_FAMILY_CONTACT_AGE} or older`
       );
     }
+    // "local" is set for nearby mandals, not chosen by anyone else.
+    if (value.travel.mode === "local" && !isLocalMandal(value.mandal)) {
+      issue(["travel", "mode"], "Select how you are travelling");
+    }
     if (value.travel.mode === "personal_vehicle") {
       const max = maxVehiclesFor(value.type, value.members.length);
       if ((value.travel.vehicleCount ?? 1) > max) {
@@ -181,6 +222,15 @@ export const newRegistrationSchema = z
           issue(["travel", "vehicleNumbers", index], "The same vehicle is listed twice");
         seenPlates.add(normalizePlate(plate));
       });
+    }
+    // Landing in India before reaching the event, leaving after it ends.
+    const landing = value.indiaTravel?.arrival?.date;
+    const leaving = value.indiaTravel?.departure?.date;
+    if (landing && landing > value.arrival.date) {
+      issue(["indiaTravel", "arrival", "date"], "Has to be on or before you reach the event");
+    }
+    if (leaving && leaving < value.departure.date) {
+      issue(["indiaTravel", "departure", "date"], "Has to be on or after you leave the event");
     }
     if (value.travel.vehicleNumbers.length > (value.travel.vehicleCount ?? 1)) {
       issue(["travel", "vehicleNumbers"], "More vehicle numbers than vehicles");
@@ -222,6 +272,8 @@ function memberIds(input: NewRegistrationInput, existingIds: readonly string[]) 
  */
 export function toCreateData(input: NewRegistrationInput, existingIds: readonly string[] = []) {
   const ids = memberIds(input, existingIds);
+  // A nearby mandal travels from home and sleeps there: no travel, no beds.
+  const local = isLocalMandal(input.mandal);
   const members = input.members.map((m, index) => ({
     ...m,
     id: ids[index],
@@ -230,7 +282,9 @@ export function toCreateData(input: NewRegistrationInput, existingIds: readonly 
     assistanceNote: m.needsAssistance ? m.assistanceNote : null,
     // Someone who leaves the day they arrive has no night here, so no bed.
     needsAccommodation:
-      (m.needsAccommodation ?? input.accommodationRequired) && m.departure.date > m.arrival.date,
+      !local &&
+      (m.needsAccommodation ?? input.accommodationRequired) &&
+      m.departure.date > m.arrival.date,
   }));
 
   return {
@@ -239,28 +293,59 @@ export function toCreateData(input: NewRegistrationInput, existingIds: readonly 
     type: input.type,
     groupName: input.type === "individual" ? null : input.groupName,
     mandal: input.mandal,
-    city: input.city,
     members,
     arrival: input.arrival,
     departure: input.departure,
-    travel: {
-      ...input.travel,
-      vehicleCount:
-        input.travel.mode === "personal_vehicle" ? (input.travel.vehicleCount ?? 1) : null,
-      vehicleNumbers:
-        input.travel.mode === "personal_vehicle"
-          ? input.travel.vehicleNumbers.filter(Boolean).map(n => n.toUpperCase())
-          : [],
-      needsPickup:
-        (input.travel.mode === "train" || input.travel.mode === "flight") &&
-        input.travel.needsPickup,
-      needsDrop:
-        (input.travel.mode === "train" || input.travel.mode === "flight") && input.travel.needsDrop,
-    },
+    travel: local
+      ? {
+          mode: "local",
+          vehicleCount: null,
+          vehicleNumbers: [],
+          reference: null,
+          needsPickup: false,
+          needsDrop: false,
+        }
+      : {
+          ...input.travel,
+          vehicleCount:
+            input.travel.mode === "personal_vehicle" ? (input.travel.vehicleCount ?? 1) : null,
+          vehicleNumbers:
+            input.travel.mode === "personal_vehicle"
+              ? input.travel.vehicleNumbers.filter(Boolean).map(n => n.toUpperCase())
+              : [],
+          needsPickup:
+            (input.travel.mode === "train" || input.travel.mode === "flight") &&
+            input.travel.needsPickup,
+          needsDrop:
+            (input.travel.mode === "train" || input.travel.mode === "flight") &&
+            input.travel.needsDrop,
+        },
     // True when anyone in the party has a bed coming; each person's own
     // answer is on them.
     accommodationRequired: members.some(m => m.needsAccommodation),
+    indiaTravel: indiaTravelRecord(input),
     notes: input.notes,
+  };
+}
+
+/**
+ * The Ahmedabad airport pickup and drop as stored: only for an overseas
+ * mandal that asked for either, with the flight for each one asked for.
+ */
+function indiaTravelRecord(input: NewRegistrationInput) {
+  const india = input.indiaTravel;
+  if (!india || !OVERSEAS_MANDALS.includes(input.mandal)) return null;
+  if (!india.needsPickup && !india.needsDrop) return null;
+  type Leg = NonNullable<typeof india.arrival>;
+  const leg = (f?: Leg) =>
+    f
+      ? { date: f.date, time: f.time || null, flight: f.flight ? f.flight.toUpperCase() : null }
+      : null;
+  return {
+    needsPickup: india.needsPickup,
+    arrival: india.needsPickup ? leg(india.arrival) : null,
+    needsDrop: india.needsDrop,
+    departure: india.needsDrop ? leg(india.departure) : null,
   };
 }
 
@@ -291,11 +376,22 @@ export function toRegistrationDto(r: Registration) {
     type: r.type,
     groupName: r.groupName,
     mandal: r.mandal,
-    city: r.city,
-    members: r.members.map(m => compact({ ...m, needsAccommodation: wantsBed(r, m) })),
-    arrival: r.arrival,
-    departure: r.departure,
+    members: r.members.map(m =>
+      compact({
+        ...m,
+        arrival: compact({ ...m.arrival }),
+        departure: compact({ ...m.departure }),
+        needsAccommodation: wantsBed(r, m),
+      })
+    ),
+    arrival: compact({ ...r.arrival }),
+    departure: compact({ ...r.departure }),
     travel: compact({ ...r.travel }),
+    indiaTravel: r.indiaTravel && {
+      ...r.indiaTravel,
+      arrival: r.indiaTravel.arrival ? compact({ ...r.indiaTravel.arrival }) : undefined,
+      departure: r.indiaTravel.departure ? compact({ ...r.indiaTravel.departure }) : undefined,
+    },
     accommodationRequired: r.accommodationRequired,
     notes: r.notes,
     status: r.status,

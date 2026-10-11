@@ -59,7 +59,7 @@ registrationRouter.post("/mine", mine);
  *     description: >
  *       Public. The full registration plus `mobileVerificationToken` for its
  *       primary contact's number (spent). The contact number cannot change
- *       here. A confirmed registration goes back to pending.
+ *       here. The status is kept; the change is logged for admins.
  *     tags: [Registrations]
  *     responses:
  *       200:
@@ -161,7 +161,8 @@ registrationRouter.patch("/:id/status", requireReviewer, setStatus);
  *     description: >
  *       The full registration. Status is kept. Changing the primary contact's
  *       number needs `mobileVerificationToken` for the new one, or
- *       `verifiedInPerson` from a sanchalak or admin.
+ *       `verifiedInPerson` from a sanchalak or admin. The change is logged
+ *       for admins.
  *     tags: [Registrations]
  *     responses:
  *       200:

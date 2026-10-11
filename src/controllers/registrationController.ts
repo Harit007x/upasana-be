@@ -4,8 +4,10 @@ import { z } from "zod";
 import { Prisma, type Registration } from "@prisma/client";
 
 import { MOBILE_E164, formatRegistrationCode } from "../lib/event";
-import { releaseStaleAllotments, stayForDevotee } from "../lib/allotments";
+// PAUSED 2026-10-11 — per-person room allotment (rooms now go to mandals).
+// import { releaseStaleAllotments, stayForDevotee } from "../lib/allotments";
 import { consumeVerificationToken, peekVerificationToken } from "../lib/otp";
+import { recordChange } from "../lib/registration-changes";
 import {
   newRegistrationSchema,
   statusSchema,
@@ -263,7 +265,7 @@ const setStatus = async (req: Request, res: Response): Promise<void> => {
     where: { id },
     data: { status: parsed.data.status },
   });
-  await releaseStaleAllotments(registration);
+  // await releaseStaleAllotments(registration); // paused: per-person allotment
   res.status(200).json({ success: true, data: toRegistrationDto(registration) });
 };
 
@@ -302,7 +304,8 @@ const update = async (req: Request, res: Response): Promise<void> => {
     if (isDuplicateContact(error) && (await contactTaken(req, res, parsed.data.members[0]?.mobile, id))) return;
     throw error;
   }
-  await releaseStaleAllotments(registration);
+  // await releaseStaleAllotments(registration); // paused: per-person allotment
+  await recordChange(existing, registration, { by: "team", name: req.user.name, userId: req.user.id });
   res.status(200).json({ success: true, data: toRegistrationDto(registration) });
 };
 
@@ -328,18 +331,21 @@ const mine = async (req: Request, res: Response): Promise<void> => {
     where: byPrimaryMobile(mobile),
     orderBy: { createdAt: "desc" },
   });
-  // Their room details, once sent — or that they are being updated.
-  const stays = await stayForDevotee(registrations);
-  res.status(200).json({
-    success: true,
-    data: registrations.map((r) => {
-      const stay = stays.get(r.id);
-      return {
-        ...toRegistrationDto(r),
-        ...(stay ? { stay: stay.notice ?? undefined, stayChanging: !stay.upToDate } : {}),
-      };
-    }),
-  });
+  res.status(200).json({ success: true, data: registrations.map(toRegistrationDto) });
+  // PAUSED 2026-10-11 — per-person allotment: their room details, once sent,
+  // or that they are being updated.
+  //
+  // const stays = await stayForDevotee(registrations);
+  // res.status(200).json({
+  //   success: true,
+  //   data: registrations.map((r) => {
+  //     const stay = stays.get(r.id);
+  //     return {
+  //       ...toRegistrationDto(r),
+  //       ...(stay ? { stay: stay.notice ?? undefined, stayChanging: !stay.upToDate } : {}),
+  //     };
+  //   }),
+  // });
 };
 
 /** Statuses a devotee can no longer edit online: they are at the event, or it was called off. */
@@ -348,8 +354,8 @@ const LOCKED_FOR_SELF = new Set(["checked_in", "cancelled"]);
 /**
  * Public: a devotee editing their own registration, proven by an OTP token for
  * its primary contact's number (spent here). The contact number itself stays
- * — changing it is for the desk. A confirmed registration goes back to
- * pending, so the seva team reviews the change.
+ * — changing it is for the desk. The status stays as it is, confirmed
+ * included; every change is logged for admins (Logs screen) instead.
  */
 const updateSelf = async (req: Request, res: Response): Promise<void> => {
   const id = String(req.params.id);
@@ -395,12 +401,12 @@ const updateSelf = async (req: Request, res: Response): Promise<void> => {
     where: { id },
     data: {
       ...toCreateData(parsed.data, existing.members.map((m) => m.id)),
-      status: existing.status === "confirmed" ? "pending" : existing.status,
       editedAt: new Date(),
       editedByName: "the devotee",
     },
   });
-  await releaseStaleAllotments(registration);
+  // await releaseStaleAllotments(registration); // paused: per-person allotment
+  await recordChange(existing, registration, { by: "devotee" });
   res.status(200).json({ success: true, data: toRegistrationDto(registration) });
 };
 
