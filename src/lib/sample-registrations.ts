@@ -31,7 +31,8 @@ import { prisma } from "../utils/db";
 type Gender = "male" | "female";
 type Member = {
   id: string;
-  fullName: string;
+  firstName: string;
+  surname: string;
   gender: Gender;
   age: number;
   mobile?: string;
@@ -212,7 +213,7 @@ const DESK_NAMES = ["Nilesh Joshi", "Hetal Mehta", "Bhavesh Raval"];
 
 const ABROAD = new Set(OVERSEAS_MANDALS);
 
-/** "2027-01-28" moved by `days`. */
+/** "2027-01-29" moved by `days`. */
 function shiftDate(iso: string, days: number) {
   const date = new Date(`${iso}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + days);
@@ -298,7 +299,7 @@ export function buildSampleRegistrations(): SeedRegistration[] {
 
   const makeMember = (
     index: number,
-    fields: Pick<Member, "fullName" | "gender" | "age"> &
+    fields: Pick<Member, "firstName" | "surname" | "gender" | "age"> &
       Partial<Pick<Member, "relation" | "isPrimary">>,
     schedule: [StayPoint, StayPoint]
   ): Member => {
@@ -355,7 +356,8 @@ export function buildSampleRegistrations(): SeedRegistration[] {
         makeMember(
           0,
           {
-            fullName: `${nameFor(gender)} ${surname}`,
+            firstName: nameFor(gender),
+            surname,
             gender,
             age: between(17, 45),
             isPrimary: true,
@@ -370,7 +372,8 @@ export function buildSampleRegistrations(): SeedRegistration[] {
         makeMember(
           0,
           {
-            fullName: `${nameFor("male")} ${surname}`,
+            firstName: nameFor("male"),
+            surname,
             gender: "male",
             age: headAge,
             isPrimary: true,
@@ -380,7 +383,8 @@ export function buildSampleRegistrations(): SeedRegistration[] {
         makeMember(
           1,
           {
-            fullName: `${nameFor("female")} ${surname}`,
+            firstName: nameFor("female"),
+            surname,
             gender: "female",
             age: headAge - between(1, 5),
             relation: "Spouse",
@@ -395,7 +399,8 @@ export function buildSampleRegistrations(): SeedRegistration[] {
           makeMember(
             members.length,
             {
-              fullName: `${nameFor(gender)} ${surname}`,
+              firstName: nameFor(gender),
+              surname,
               gender,
               age: between(6, Math.max(8, headAge - 22)),
               relation: gender === "male" ? "Son" : "Daughter",
@@ -413,7 +418,8 @@ export function buildSampleRegistrations(): SeedRegistration[] {
           makeMember(
             members.length,
             {
-              fullName: `${nameFor(gender)} ${surname}`,
+              firstName: nameFor(gender),
+              surname,
               gender,
               age: between(66, 82),
               relation: gender === "male" ? "Father" : "Mother",

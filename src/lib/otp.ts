@@ -14,6 +14,16 @@ import { MOBILE_E164 } from "./event";
  * matter: the endpoint is public, and every code sent is paid for.
  */
 
+/**
+ * TEMPORARY: off until the WhatsApp Business API is set up to send codes. While
+ * off, a new registration needs no code for its contact number and is saved
+ * with `mobileVerification` null. Devotees editing their own registration
+ * (/register/edit) still need a code — that is what keeps one devotee out of
+ * another's details. Turn back on together with MOBILE_OTP_REQUIRED in
+ * upasana-fe/src/features/registrations/form/schema.ts.
+ */
+export const MOBILE_OTP_REQUIRED = false;
+
 /** How long a code works. */
 export const OTP_TTL_MINUTES = 10;
 /** Wrong guesses before a code stops working and a new one is needed. */

@@ -38,7 +38,7 @@ import {
  */
 
 const stayPoint = z.object({
-  date: z.enum(STAY_DATES, { error: "Pick a day between 28 January and 1 February" }),
+  date: z.enum(STAY_DATES, { error: "Pick a day between 29 January and 1 February" }),
   slot: z.enum(TIME_SLOTS, { error: "Pick a time of day" }),
   // Whether they take the meal served then: breakfast, lunch or dinner.
   meal: z.boolean({ error: "Say whether you will take the meal" }),
@@ -90,35 +90,79 @@ const indiaTravel = z
   })
   .optional();
 
-const member = z.object({
-  /** The person's id from an earlier save, when editing; empty for someone new. */
-  id: z.string().max(40).optional(),
-  fullName: text(120)
-    .min(2, "Enter the full name")
-    .refine(v => !hasNonLatinLetters(v), ENGLISH_LETTERS),
-  gender: z.enum(GENDERS, { error: "Select a gender" }),
-  age: z
-    .number({ error: "Enter the age" })
-    .int()
-    .min(1, "Age must be 1 to 100")
-    .max(100, "Age must be 1 to 100"),
-  mobile: z
-    .string()
-    .regex(MOBILE_E164, "Enter a valid mobile number with country code")
-    .optional()
-    .nullable()
-    .transform(v => v ?? null),
-  relation: optionalText(40),
-  isPrimary: z.boolean(),
-  needsAssistance: z.boolean(),
-  assistanceNote: optionalText(300),
-  arrival: stayPoint,
-  departure: stayPoint,
-  /** Asks for a bed for this person. Absent: as `accommodationRequired` says for everyone. */
-  needsAccommodation: z.boolean().optional(),
-  /** Aged YOUTH_MAX_AGE or under: whether they will attend the Youth Convention. Optional. */
-  attendsYouthConvention: z.boolean().optional(),
-});
+/** One part of a person's name: in English letters, single-spaced. */
+const namePart = (max: number) =>
+  text(max)
+    .refine(v => !hasNonLatinLetters(v), ENGLISH_LETTERS)
+    .transform(v => v.replace(/\s+/g, " "));
+
+type NameParts = { firstName: string; middleName?: string | null; surname: string };
+
+/** "Ramesh Kantilal Patel": what is stored as `fullName`, and what every screen shows. */
+export const fullNameOf = (name: NameParts) =>
+  [name.firstName, name.middleName, name.surname]
+    .map(part => (part ?? "").trim().replace(/\s+/g, " "))
+    .filter(Boolean)
+    .join(" ");
+
+/**
+ * A one-line name split into first, middle and surname: the first word, the
+ * last, and anything between. For people saved, or forms left open, from
+ * before the name was asked in parts. Mirrors splitFullName in the form.
+ */
+export function splitFullName(fullName: string) {
+  const words = fullName.trim().split(/\s+/).filter(Boolean);
+  if (words.length < 2) return { firstName: words[0] ?? "", middleName: null, surname: "" };
+  return {
+    firstName: words[0],
+    middleName: words.slice(1, -1).join(" ") || null,
+    surname: words[words.length - 1],
+  };
+}
+
+/** A person as sent before the form asked for the name in parts: one `fullName`, split here. */
+const withNameParts = (value: unknown) => {
+  if (typeof value !== "object" || value === null) return value;
+  const person = value as Record<string, unknown>;
+  if (typeof person.fullName !== "string" || person.firstName !== undefined) return value;
+  return { ...person, ...splitFullName(person.fullName) };
+};
+
+const member = z.preprocess(
+  withNameParts,
+  z.object({
+    /** The person's id from an earlier save, when editing; empty for someone new. */
+    id: z.string().max(40).optional(),
+    firstName: namePart(60).pipe(z.string().min(1, "Enter the first name")),
+    middleName: namePart(60)
+      .optional()
+      .nullable()
+      .transform(v => (v ? v : null)),
+    surname: namePart(60).pipe(z.string().min(1, "Enter the surname")),
+    gender: z.enum(GENDERS, { error: "Select a gender" }),
+    age: z
+      .number({ error: "Enter the age" })
+      .int()
+      .min(1, "Age must be 1 to 100")
+      .max(100, "Age must be 1 to 100"),
+    mobile: z
+      .string()
+      .regex(MOBILE_E164, "Enter a valid mobile number with country code")
+      .optional()
+      .nullable()
+      .transform(v => v ?? null),
+    relation: optionalText(40),
+    isPrimary: z.boolean(),
+    needsAssistance: z.boolean(),
+    assistanceNote: optionalText(300),
+    arrival: stayPoint,
+    departure: stayPoint,
+    /** Asks for a bed for this person. Absent: as `accommodationRequired` says for everyone. */
+    needsAccommodation: z.boolean().optional(),
+    /** Aged YOUTH_MAX_AGE or under: whether they will attend the Youth Convention. Optional. */
+    attendsYouthConvention: z.boolean().optional(),
+  })
+);
 
 export const newRegistrationSchema = z
   .object({
@@ -216,8 +260,8 @@ export const newRegistrationSchema = z
     // and extra spaces.
     const seen = new Set<string>();
     value.members.forEach((m, index) => {
-      const key = m.fullName.trim().replace(/\s+/g, " ").toLowerCase();
-      if (seen.has(key)) issue(["members", index, "fullName"], "The same person is listed twice");
+      const key = fullNameOf(m).toLowerCase();
+      if (seen.has(key)) issue(["members", index, "firstName"], "The same person is listed twice");
       seen.add(key);
     });
     value.members.forEach((m, index) => {
@@ -350,6 +394,7 @@ export function toCreateData(input: NewRegistrationInput, existingIds: readonly 
   const members = input.members.map((m, index) => ({
     ...m,
     id: ids[index],
+    fullName: fullNameOf(m),
     isPrimary: index === 0,
     relation: input.type === "family" && index > 0 ? m.relation : null,
     assistanceNote: m.needsAssistance ? m.assistanceNote : null,
@@ -485,6 +530,8 @@ export function toRegistrationDto(r: Registration) {
     members: r.members.map(m =>
       compact({
         ...m,
+        // Saved before the name was asked in parts: split, for the form to edit.
+        ...(m.firstName ? {} : splitFullName(m.fullName)),
         arrival: compact({ ...m.arrival }),
         departure: compact({ ...m.departure }),
         needsAccommodation: wantsBed(r, m),

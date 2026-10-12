@@ -6,7 +6,7 @@ import { Prisma, type Registration } from "@prisma/client";
 import { MOBILE_E164, formatRegistrationCode } from "../lib/event";
 // PAUSED 2026-10-11 — per-person room allotment (rooms now go to mandals).
 // import { releaseStaleAllotments, stayForDevotee } from "../lib/allotments";
-import { consumeVerificationToken, peekVerificationToken } from "../lib/otp";
+import { MOBILE_OTP_REQUIRED, consumeVerificationToken, peekVerificationToken } from "../lib/otp";
 import { recordChange } from "../lib/registration-changes";
 import {
   newRegistrationSchema,
@@ -122,7 +122,7 @@ function alreadyRegistered(req: Request, res: Response, existing: Registration) 
 const isDuplicateContact = (error: unknown) =>
   error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 
-type Verification = { mobileVerification: string; verifiedByName: string | null };
+type Verification = { mobileVerification: string | null; verifiedByName: string | null };
 
 /**
  * How the primary contact's number is vouched for, checked last so nothing is
@@ -130,7 +130,9 @@ type Verification = { mobileVerification: string; verifiedByName: string | null 
  *
  * - unchanged from `keptMobile` (an edit that keeps the contact): nothing to do;
  * - `verifiedInPerson`: a sanchalak or admin at the desk vouches for it;
- * - otherwise an unused OTP token for this very number, which is spent here.
+ * - otherwise an unused OTP token for this very number, which is spent here —
+ *   unless codes are switched off (MOBILE_OTP_REQUIRED), when it is recorded
+ *   as unverified.
  *
  * Returns what to record, "unchanged", or null after answering the request.
  */
@@ -154,6 +156,8 @@ async function verifyPrimaryMobile(
     }
     return { mobileVerification: "in_person", verifiedByName: req.user.name };
   }
+
+  if (!MOBILE_OTP_REQUIRED) return { mobileVerification: null, verifiedByName: null };
 
   const token = input.mobileVerificationToken;
   if (mobile && token && (await consumeVerificationToken(token, mobile))) {

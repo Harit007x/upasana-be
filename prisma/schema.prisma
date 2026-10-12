@@ -371,7 +371,14 @@ type RegistrationMember {
   /// keyed on it. Older registrations have "m0", "m1", …; new people get a
   /// random one.
   id                 String
+  /// The parts below joined ("Ramesh Kantilal Patel"): what lists, search
+  /// and reports show.
   fullName           String
+  /// Asked in parts since October 2026. Null on people saved before: the API
+  /// splits their `fullName` (see splitFullName).
+  firstName          String?
+  middleName         String?
+  surname            String?
   /// "male" | "female"
   gender             String
   age                Int
@@ -392,7 +399,7 @@ type RegistrationMember {
   needsAccommodation Boolean?
 }
 
-/// A calendar day at the venue ("2027-01-28") and a rough time of day.
+/// A calendar day at the venue ("2027-01-29") and a rough time of day.
 type StayPoint {
   date String
   /// "morning" | "afternoon" | "evening"
