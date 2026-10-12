@@ -16,9 +16,14 @@
  * A partial index solves it: unique over the documents where the field is a
  * string, and silent about the rest.
  *
+ * Assistant chats and the team's questions delete themselves 30 days after
+ * last use: TTL indexes, which Prisma cannot express either. MongoDB's TTL
+ * monitor removes expired documents about once a minute.
+ *
  * `createIndexes` is idempotent: creating an index that already exists with the
  * same definition is a no-op, so this is safe to run blind.
  */
+import { ASSISTANT_RETENTION_DAYS } from "../src/lib/assistant";
 import { prisma } from "../src/utils/db";
 
 const main = async () => {
@@ -35,10 +40,27 @@ const main = async () => {
   });
   console.log("registration_contactMobile_partial_key is in place.");
 
+  for (const [collection, field] of [
+    ["assistant_chat", "updatedAt"],
+    ["assistant_ask", "askedAt"],
+  ] as const) {
+    await prisma.$runCommandRaw({
+      createIndexes: collection,
+      indexes: [
+        {
+          key: { [field]: 1 },
+          name: `${collection}_${field}_ttl`,
+          expireAfterSeconds: ASSISTANT_RETENTION_DAYS * 24 * 60 * 60,
+        },
+      ],
+    });
+    console.log(`${collection}_${field}_ttl is in place (${ASSISTANT_RETENTION_DAYS} days).`);
+  }
+
   await prisma.$disconnect();
 };
 
-main().catch(async (e) => {
+main().catch(async e => {
   console.error(e?.message ?? e);
   await prisma.$disconnect();
   process.exit(1);

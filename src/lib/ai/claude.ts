@@ -26,9 +26,14 @@ export const DEFAULT_MODEL = "claude-sonnet-5";
  * Anthropic's published prices per million tokens, for the usage ledger.
  * Correct at time of writing, and the one place to change when it moves.
  */
-const PRICE_PER_MTOK: Record<string, { input: number; output: number }> = {
+const PRICE_PER_MTOK: Record<string, { input: number; output: number; cacheRead?: number }> = {
+  "claude-fable-5-1": { input: 10, output: 50 },
+  // Opus 5.5 reads its cache at a twentieth of the input price, not a tenth.
+  "claude-opus-5-5": { input: 4, output: 20, cacheRead: 0.2 },
   "claude-opus-5": { input: 5, output: 25 },
+  "claude-sonnet-5-5": { input: 2, output: 10 },
   "claude-sonnet-5": { input: 2, output: 10 },
+  "claude-haiku-5-5": { input: 0.1, output: 0.5 },
   "claude-haiku-4-5": { input: 1, output: 5 },
 };
 
@@ -227,4 +232,126 @@ export const completeJson = async <T>(opts: CompleteOptions): Promise<T> => {
       true
     );
   }
+};
+
+/**
+ * The model behind the admins' Assistant, when ASSISTANT_MODEL does not say
+ * otherwise. Haiku: the work is picking a tool and its filters from a fixed
+ * menu, then summing up what came back — and at $0.10 / $0.50 per million
+ * tokens a question costs a fraction of a rupee. The tools check every input
+ * and send mistakes back for the model to fix.
+ */
+export const DEFAULT_ASSISTANT_MODEL = "claude-haiku-5-5";
+
+/**
+ * ASSISTANT_MODEL from the environment, read on every call so a restart is
+ * all a change needs. Any current Claude model id works (claude-sonnet-5-5,
+ * claude-opus-5-5…); it must take `output_config.effort`, which rules out
+ * Haiku 4.5 and Sonnet 4.5.
+ */
+export const assistantModel = (): string =>
+  process.env.ASSISTANT_MODEL?.trim() || DEFAULT_ASSISTANT_MODEL;
+
+/**
+ * Haiku 5.5 has two rate cards: a prompt over 100K tokens (a very long chat)
+ * is billed at five times the rate, all of it.
+ */
+const HAIKU_LONG_PROMPT = 100_000;
+const HAIKU_LONG_PRICE = { input: 0.5, output: 2.5 };
+
+/** A model missing from PRICE_PER_MTOK is metered at Haiku's price; say so once. */
+const unpriced = new Set<string>();
+const warnUnpriced = (model: string) => {
+  if (unpriced.has(model)) return;
+  unpriced.add(model);
+  console.warn(
+    `[ai] No price for ${model} in PRICE_PER_MTOK (src/lib/ai/claude.ts); usage_event costs are wrong until it is added.`
+  );
+};
+
+/** Cache prices relative to the input price, unless the table says otherwise. */
+const CACHE_WRITE_FACTOR = 1.25;
+const CACHE_READ_FACTOR = 0.1;
+
+export interface ConverseOptions {
+  /** Stable text first, so it caches; anything that changes daily last. */
+  system: Anthropic.TextBlockParam[];
+  messages: Anthropic.MessageParam[];
+  tools: Anthropic.Tool[];
+  maxTokens?: number;
+  userId?: string;
+  purpose: string;
+}
+
+/**
+ * One turn of a conversation with tools, metered: the model either answers
+ * or asks for tools to be run. The caller runs them and calls again with the
+ * results appended — the loop lives with whoever holds the data.
+ *
+ * Unlike `complete`, the reply is returned whole (thinking blocks included):
+ * the next turn has to send it back unchanged.
+ *
+ * A refusal comes back as a reply with `stop_reason: "refusal"` and no text,
+ * for the caller to show; Haiku has no server-side fallback to another model.
+ */
+export const converse = async (opts: ConverseOptions): Promise<Anthropic.Message> => {
+  const maxTokens = opts.maxTokens ?? 16_000;
+  const model = assistantModel();
+
+  let response;
+  try {
+    response = await anthropic().messages.create(
+      {
+        model,
+        max_tokens: maxTokens,
+        // Caches the conversation so far; each turn re-reads it at a tenth
+        // of the price instead of paying for the whole history again.
+        cache_control: { type: "ephemeral" },
+        // Medium rather than low: reading "travelling on the 29th" into the
+        // right filters is where it earns its keep, and the thinking is cheap.
+        output_config: { effort: "medium" },
+        system: opts.system,
+        tools: opts.tools,
+        messages: opts.messages,
+      },
+      { timeout: timeoutFor(maxTokens), maxRetries: MAX_RETRIES }
+    );
+  } catch (error) {
+    const status = (error as { status?: number }).status;
+    const permanent = status === 400 || status === 401 || status === 403;
+    throw new AiError(
+      `Anthropic call failed${status ? ` (${status})` : ""}: ${(error as Error).message}`,
+      permanent
+    );
+  }
+
+  const usage = response.usage;
+  const written = usage.cache_creation_input_tokens ?? 0;
+  const read = usage.cache_read_input_tokens ?? 0;
+  const prompt = usage.input_tokens + written + read;
+  const listed = PRICE_PER_MTOK[response.model] ?? PRICE_PER_MTOK[model];
+  if (!listed) warnUnpriced(model);
+  const base = listed ?? PRICE_PER_MTOK[DEFAULT_ASSISTANT_MODEL];
+  const price: { input: number; output: number; cacheRead?: number } =
+    response.model === "claude-haiku-5-5" && prompt > HAIKU_LONG_PROMPT ? HAIKU_LONG_PRICE : base;
+  const cacheRead = price.cacheRead ?? price.input * CACHE_READ_FACTOR;
+  await recordUsage({
+    endpoint: `ai:${opts.purpose}`,
+    userId: opts.userId,
+    units: prompt + usage.output_tokens,
+    costUsd:
+      ((usage.input_tokens + written * CACHE_WRITE_FACTOR) * price.input +
+        read * cacheRead +
+        usage.output_tokens * price.output) /
+      1_000_000,
+  });
+
+  if (response.stop_reason === "max_tokens") {
+    throw new AiError(
+      `The model ran out of output tokens (limit ${maxTokens}) on "${opts.purpose}".`,
+      true
+    );
+  }
+
+  return response;
 };

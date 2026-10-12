@@ -8,16 +8,24 @@
  *
  * Used by the admin toggle (adminSampleDataController) and by
  * `pnpm seed:registrations`.
+ *
+ * Each sample is built as the form would send it and saved through the same
+ * check and shaping as a real registration (`newRegistrationSchema`,
+ * `toCreateData`), so samples follow every rule the form does — and a rule
+ * they break fails the save, and sample-registrations.test.ts, loudly.
  */
 import {
   EVENT_DAYS,
   MANDALS,
   OVERSEAS_MANDALS,
   STAY_DATES,
+  TRAIN_STATIONS,
+  YOUTH_MAX_AGE,
   formatRegistrationCode,
   isLocalMandal,
   type StayPoint,
 } from "./event";
+import { newRegistrationSchema, toCreateData } from "./registrations";
 import { prisma } from "../utils/db";
 
 type Gender = "male" | "female";
@@ -33,7 +41,10 @@ type Member = {
   assistanceNote?: string;
   arrival: StayPoint;
   departure: StayPoint;
+  needsAccommodation?: boolean;
+  attendsYouthConvention?: boolean;
 };
+type SeedFlight = { date: string; time: string; flight: string };
 type SeedRegistration = {
   sequence: number;
   code: string;
@@ -48,18 +59,28 @@ type SeedRegistration = {
     vehicleCount?: number;
     vehicleNumbers: string[];
     reference?: string;
+    arrivalTime?: string;
+    station?: string;
     needsPickup: boolean;
+    needsDrop?: boolean;
+    departureMode?: string;
+    departureReference?: string;
+    departureStation?: string;
+    departureTime?: string;
   };
   indiaTravel?: {
     needsPickup: boolean;
-    arrival: { date: string; time: string; flight: string } | null;
+    arrival?: SeedFlight;
     needsDrop: boolean;
-    departure: { date: string; time: string; flight: string } | null;
+    departure?: SeedFlight;
   };
   accommodationRequired: boolean;
   notes?: string;
   status: string;
   source: string;
+  /** "otp", or "in_person" when someone at the desk vouched (`verifiedByName`). */
+  mobileVerification: string;
+  verifiedByName?: string;
   createdAt: string;
 };
 type RegistrationType = string;
@@ -178,6 +199,17 @@ const TRAINS = [
   "12933 Karnavati Exp",
 ];
 
+const BUSES = [
+  "GSRTC Volvo",
+  "GSRTC Express",
+  "Shrinath Travels sleeper",
+  "Patel Travels",
+  "Eagle Travels",
+];
+
+/** The team at the desk, for registrations verified in person. Made up. */
+const DESK_NAMES = ["Nilesh Joshi", "Hetal Mehta", "Bhavesh Raval"];
+
 const ABROAD = new Set(OVERSEAS_MANDALS);
 
 /** "2027-01-28" moved by `days`. */
@@ -195,9 +227,15 @@ export function buildSampleRegistrations(): SeedRegistration[] {
   const mobile = (mandal: string) =>
     mandal === "London (UK)"
       ? `+447${between(100000000, 999999999)}`
-      : mandal === "New Jersey (USA)"
+      : mandal === "New Jersey (USA)" || mandal === "Canada"
         ? `+1${between(201, 989)}${between(1000000, 9999999)}`
-        : `+919${between(100000000, 999999999)}`;
+        : mandal === "Australia"
+          ? `+614${between(10000000, 99999999)}`
+          : mandal === "New Zealand"
+            ? `+6421${between(1000000, 9999999)}`
+            : mandal === "Dubai (UAE)"
+              ? `+9715${between(10000000, 99999999)}`
+              : `+919${between(100000000, 999999999)}`;
 
   // One registration per contact number, so no two samples share one.
   const usedContacts = new Set<string>();
@@ -206,6 +244,22 @@ export function buildSampleRegistrations(): SeedRegistration[] {
     while (usedContacts.has(number)) number = mobile(mandal);
     usedContacts.add(number);
     return number;
+  };
+
+  /** "HH:MM" inside a slot, so a morning arrival comes on a morning train. */
+  const timeIn = (slot: string) => {
+    const [from, to] = slot === "morning" ? [6, 11] : slot === "afternoon" ? [12, 15] : [16, 22];
+    return `${String(between(from, to)).padStart(2, "0")}:${pick(["00", "15", "30", "45"])}`;
+  };
+
+  // The first names already used in the registration being built: nobody is
+  // listed twice.
+  let usedNames = new Set<string>();
+  const nameFor = (gender: Gender) => {
+    const names = (gender === "male" ? MALE_NAMES : FEMALE_NAMES).filter(n => !usedNames.has(n));
+    const name = pick(names);
+    usedNames.add(name);
+    return name;
   };
 
   // Most people take the meal served as they arrive or before they leave.
@@ -231,9 +285,12 @@ export function buildSampleRegistrations(): SeedRegistration[] {
       ];
     }
     // Event days only: comes late, leaves early, or both.
-    const startIndex = between(1, EVENT_DAYS.length - 1);
-    const endIndex = between(startIndex + 1, EVENT_DAYS.length);
-    return [stay(STAY_DATES[startIndex], "morning"), stay(STAY_DATES[endIndex], "evening")];
+    // Indices into EVENT_DAYS: arrive on day 2 to the second-last day, leave
+    // a later day up to the last. (Leaving one past the last day once meant
+    // the day after the event; with event days only it is no day at all.)
+    const startIndex = between(1, EVENT_DAYS.length - 2);
+    const endIndex = between(startIndex + 1, EVENT_DAYS.length - 1);
+    return [stay(EVENT_DAYS[startIndex], "morning"), stay(EVENT_DAYS[endIndex], "evening")];
   };
 
   // The mandal of the registration being built, for the mobile's country code.
@@ -268,6 +325,10 @@ export function buildSampleRegistrations(): SeedRegistration[] {
         : undefined,
       arrival: schedule[0],
       departure: schedule[1],
+      // Asked of everyone 40 and under; a few skip it, as it is optional.
+      ...(fields.age <= YOUTH_MAX_AGE && chance(0.85)
+        ? { attendsYouthConvention: chance(0.6) }
+        : {}),
     };
   };
 
@@ -283,6 +344,7 @@ export function buildSampleRegistrations(): SeedRegistration[] {
     const local = isLocalMandal(mandal);
     const schedule = pickSchedule(abroad);
     const surname = pick(SURNAMES);
+    usedNames = new Set();
 
     const members: Member[] = [];
     let groupName: string | undefined;
@@ -293,7 +355,7 @@ export function buildSampleRegistrations(): SeedRegistration[] {
         makeMember(
           0,
           {
-            fullName: `${pick(gender === "male" ? MALE_NAMES : FEMALE_NAMES)} ${surname}`,
+            fullName: `${nameFor(gender)} ${surname}`,
             gender,
             age: between(17, 45),
             isPrimary: true,
@@ -308,7 +370,7 @@ export function buildSampleRegistrations(): SeedRegistration[] {
         makeMember(
           0,
           {
-            fullName: `${pick(MALE_NAMES)} ${surname}`,
+            fullName: `${nameFor("male")} ${surname}`,
             gender: "male",
             age: headAge,
             isPrimary: true,
@@ -318,7 +380,7 @@ export function buildSampleRegistrations(): SeedRegistration[] {
         makeMember(
           1,
           {
-            fullName: `${pick(FEMALE_NAMES)} ${surname}`,
+            fullName: `${nameFor("female")} ${surname}`,
             gender: "female",
             age: headAge - between(1, 5),
             relation: "Spouse",
@@ -333,7 +395,7 @@ export function buildSampleRegistrations(): SeedRegistration[] {
           makeMember(
             members.length,
             {
-              fullName: `${pick(gender === "male" ? MALE_NAMES : FEMALE_NAMES)} ${surname}`,
+              fullName: `${nameFor(gender)} ${surname}`,
               gender,
               age: between(6, Math.max(8, headAge - 22)),
               relation: gender === "male" ? "Son" : "Daughter",
@@ -351,7 +413,7 @@ export function buildSampleRegistrations(): SeedRegistration[] {
           makeMember(
             members.length,
             {
-              fullName: `${pick(gender === "male" ? MALE_NAMES : FEMALE_NAMES)} ${surname}`,
+              fullName: `${nameFor(gender)} ${surname}`,
               gender,
               age: between(66, 82),
               relation: gender === "male" ? "Father" : "Mother",
@@ -364,8 +426,19 @@ export function buildSampleRegistrations(): SeedRegistration[] {
       }
     }
 
+    // Beds: most outstation parties want them; now and then one person in a
+    // family stays with relatives in the city instead.
+    const wantsBeds = !local && chance(0.9);
+    const withRelatives =
+      wantsBeds && members.length > 2 && chance(0.25) ? between(1, members.length - 1) : -1;
+    members.forEach((m, index) => {
+      m.needsAccommodation = wantsBeds && index !== withRelatives;
+    });
+
     let travelMode: TravelMode;
-    if (abroad) travelMode = "flight";
+    // Overseas devotees land at Ahmedabad airport (indiaTravel) and come on
+    // from there.
+    if (abroad) travelMode = "other";
     // Nearby mandals are not asked; they come from home.
     else if (local) travelMode = "local";
     else
@@ -387,6 +460,20 @@ export function buildSampleRegistrations(): SeedRegistration[] {
     ).toISOString();
 
     const vehicleCount = members.length > 5 ? 2 : 1;
+    const journey =
+      travelMode === "train" || travelMode === "public_bus" || travelMode === "flight";
+    const needsPickup = journey && chance(0.7);
+    const needsDrop = needsPickup && chance(0.5);
+    const referenceFor = (mode: string) =>
+      mode === "train"
+        ? pick(TRAINS)
+        : mode === "flight"
+          ? `${pick(["6E", "AI", "QP", "SG"])} ${between(200, 2999)}`
+          : pick(BUSES);
+    // Online registrations verify the number by OTP; at the desk a sanchalak
+    // or admin may vouch for it in person instead.
+    const source = chance(0.8) ? "self" : "staff";
+    const inPerson = source === "staff" && chance(0.5);
 
     registrations.push({
       sequence: 0,
@@ -409,54 +496,78 @@ export function buildSampleRegistrations(): SeedRegistration[] {
                   `${PLATE_PREFIX[mandal] ?? "GJ-01"}-${String.fromCharCode(65 + between(0, 25))}${String.fromCharCode(65 + between(0, 25))}-${between(1000, 9999)}`
               )
             : [],
-        reference:
-          travelMode === "train"
-            ? pick(TRAINS)
-            : travelMode === "flight"
-              ? `${pick(["6E", "AI", "QP", "SG", "UK"])} ${between(200, 2999)}`
-              : undefined,
-        needsPickup: (travelMode === "train" || travelMode === "flight") && chance(0.7),
+        // By train, bus or flight: the journey in, timed to the arrival slot.
+        ...(journey
+          ? {
+              reference: referenceFor(travelMode),
+              arrivalTime: timeIn(schedule[0].slot),
+              ...(travelMode === "train" ? { station: pick(TRAIN_STATIONS) } : {}),
+            }
+          : {}),
+        needsPickup,
+        // A drop comes only with a pickup, as on the form; the way home is
+        // mostly the way they came, and timed to the departure slot.
+        needsDrop,
+        ...(needsDrop
+          ? (() => {
+              const home =
+                travelMode === "flight" ? "flight" : pick([travelMode, travelMode, "train"]);
+              return {
+                departureMode: home,
+                departureReference: referenceFor(home),
+                ...(home === "train" ? { departureStation: pick(TRAIN_STATIONS) } : {}),
+                departureTime: timeIn(schedule[1].slot),
+              };
+            })()
+          : {}),
       },
-      // Most overseas devotees fly into Ahmedabad and want a pickup; fewer a drop.
+      // Most overseas devotees fly into Ahmedabad and want a pickup; about half
+      // give their flight out.
       indiaTravel:
         abroad && chance(0.8)
           ? (() => {
               const needsPickup = chance(0.75);
-              const needsDrop = chance(0.5);
+              const flyingOut = chance(0.5);
               const time = () =>
                 `${String(between(0, 23)).padStart(2, "0")}:${pick(["00", "15", "30", "45"])}`;
               const flight = () => `${pick(["AI", "BA", "EK", "QR", "UA"])} ${between(100, 999)}`;
               return {
                 needsPickup,
-                arrival: needsPickup
+                ...(needsPickup
                   ? {
-                      date: shiftDate(schedule[0].date, -between(0, 3)),
-                      time: time(),
-                      flight: flight(),
+                      arrival: {
+                        date: shiftDate(schedule[0].date, -between(0, 3)),
+                        time: time(),
+                        flight: flight(),
+                      },
                     }
-                  : null,
-                needsDrop,
-                departure: needsDrop
+                  : {}),
+                needsDrop: false,
+                ...(flyingOut
                   ? {
-                      date: shiftDate(schedule[1].date, between(0, 3)),
-                      time: time(),
-                      flight: flight(),
+                      departure: {
+                        date: shiftDate(schedule[1].date, between(0, 3)),
+                        time: time(),
+                        flight: flight(),
+                      },
                     }
-                  : null,
+                  : {}),
               };
             })()
           : undefined,
-      accommodationRequired: !local,
+      accommodationRequired: wantsBeds,
       notes: chance(0.15)
         ? pick([
             "Will help with seva in the kitchen if needed.",
-            "Arriving together on the Vadodara mandal bus.",
+            "Arriving together with our mandal.",
             "Please keep the family in one room if possible.",
             "Requesting jain food for all members.",
           ])
         : undefined,
       status,
-      source: chance(0.8) ? "self" : "staff",
+      source,
+      mobileVerification: inPerson ? "in_person" : "otp",
+      verifiedByName: inPerson ? pick(DESK_NAMES) : undefined,
       createdAt,
     });
   }
@@ -497,27 +608,28 @@ export async function insertSampleRegistrations() {
   // every sample without one.
   for (const sample of samples) {
     if (present.has(sample.sequence)) continue;
+    const {
+      sequence,
+      code,
+      status,
+      source,
+      createdAt,
+      mobileVerification,
+      verifiedByName,
+      ...input
+    } = sample;
+    // The same check and shaping as POST /registrations.
     await prisma.registration.create({
       data: {
-        ...sample,
+        ...toCreateData(newRegistrationSchema.parse(input)),
+        sequence,
+        code,
+        status,
+        source,
         isSample: true,
-        groupName: sample.groupName ?? null,
-        notes: sample.notes ?? null,
-        contactMobile: sample.members[0]?.mobile ?? null,
-        createdAt: new Date(sample.createdAt),
-        members: sample.members.map(m => ({
-          ...m,
-          mobile: m.mobile ?? null,
-          relation: m.relation ?? null,
-          assistanceNote: m.assistanceNote ?? null,
-        })),
-        travel: {
-          mode: sample.travel.mode,
-          vehicleCount: sample.travel.vehicleCount ?? null,
-          vehicleNumbers: sample.travel.vehicleNumbers,
-          reference: sample.travel.reference ?? null,
-          needsPickup: sample.travel.needsPickup,
-        },
+        mobileVerification,
+        verifiedByName: verifiedByName ?? null,
+        createdAt: new Date(createdAt),
       },
     });
     added++;
@@ -535,10 +647,17 @@ export async function insertSampleRegistrations() {
 
 /** Deletes every sample registration, and nothing else — along with any rooms they were given. */
 export async function removeSampleRegistrations() {
-  const samples = await prisma.registration.findMany({ where: { isSample: true }, select: { id: true } });
-  await prisma.roomAllotment.deleteMany({ where: { registrationId: { in: samples.map((s) => s.id) } } });
+  const samples = await prisma.registration.findMany({
+    where: { isSample: true },
+    select: { id: true },
+  });
+  await prisma.roomAllotment.deleteMany({
+    where: { registrationId: { in: samples.map(s => s.id) } },
+  });
   // Their entries on the Logs screen go with them.
-  await prisma.registrationChange.deleteMany({ where: { registrationId: { in: samples.map((s) => s.id) } } });
+  await prisma.registrationChange.deleteMany({
+    where: { registrationId: { in: samples.map(s => s.id) } },
+  });
   const { count } = await prisma.registration.deleteMany({ where: { isSample: true } });
   return count;
 }

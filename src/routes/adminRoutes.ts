@@ -4,6 +4,7 @@ import { adminUsersController } from "../controllers/adminUsersController";
 import { adminInvitesController } from "../controllers/adminInvitesController";
 import { adminSampleDataController } from "../controllers/adminSampleDataController";
 import { registrationChangesController } from "../controllers/registrationChangesController";
+import { assistantController } from "../controllers/assistantController";
 import { protect, requireAdmin } from "../middlewares/authMiddleware";
 
 export const adminRouter = express.Router();
@@ -240,3 +241,82 @@ adminRouter.delete("/sample-data", removeSampleData);
  *         description: "`{ changes, total, page, pageSize }`"
  */
 adminRouter.get("/registration-changes", registrationChangesController.list);
+
+/**
+ * @openapi
+ * /admin/assistant:
+ *   get:
+ *     summary: Whether the Assistant is set up, and whether it counts dummy data
+ *     tags: [Admin]
+ *     responses:
+ *       200:
+ *         description: "`{ configured, includeDummy }`"
+ *   post:
+ *     summary: One turn of an Assistant chat
+ *     description: >
+ *       Adds what is new (`messages`: a question, or the browser's tool
+ *       results with their cards) to the stored chat `chatId`, sends the whole
+ *       conversation to Claude, stores and returns the reply — an answer, or
+ *       `tool_use` blocks for the browser to run. Shareable cards are also kept
+ *       for "Recently asked by the team". See src/lib/assistant.ts.
+ *     tags: [Admin]
+ *     responses:
+ *       200:
+ *         description: "`{ content, stopReason }`"
+ *       400:
+ *         description: VALIDATION_ERROR
+ *       404:
+ *         description: CHAT_NOT_FOUND — not the caller's, deleted or expired
+ *       409:
+ *         description: CHAT_TOO_LONG — start a new chat
+ *       502:
+ *         description: AI_FAILED — the model call failed
+ *       503:
+ *         description: AI_NOT_CONFIGURED — ANTHROPIC_API_KEY is not set
+ */
+adminRouter.get("/assistant", assistantController.status);
+adminRouter.post("/assistant", assistantController.turn);
+
+/**
+ * @openapi
+ * /admin/assistant/chats:
+ *   get:
+ *     summary: The caller's Assistant chats, last used first (kept 30 days)
+ *     tags: [Admin]
+ *     responses:
+ *       200:
+ *         description: "`[{ id, title, questions, updatedAt }]`"
+ *   post:
+ *     summary: Start an empty chat
+ *     tags: [Admin]
+ *     responses:
+ *       201:
+ *         description: "`{ id }`"
+ * /admin/assistant/chats/{id}:
+ *   get:
+ *     summary: One of the caller's chats, for redrawing it
+ *     tags: [Admin]
+ *     responses:
+ *       200:
+ *         description: "`{ id, title, updatedAt, messages }` — text, tool calls and cards; no thinking or result rows"
+ *       404:
+ *         description: CHAT_NOT_FOUND
+ *   delete:
+ *     summary: Delete one of the caller's chats
+ *     tags: [Admin]
+ *     responses:
+ *       200:
+ *         description: Deleted (or already gone)
+ * /admin/assistant/team:
+ *   get:
+ *     summary: Recently asked by the team — shareable cards from the last 30 days
+ *     tags: [Admin]
+ *     responses:
+ *       200:
+ *         description: "`[{ id, question, title, card, askedByName, askedAt, timesAsked }]`"
+ */
+adminRouter.get("/assistant/chats", assistantController.listChats);
+adminRouter.post("/assistant/chats", assistantController.createChat);
+adminRouter.get("/assistant/chats/:id", assistantController.getChat);
+adminRouter.delete("/assistant/chats/:id", assistantController.deleteChat);
+adminRouter.get("/assistant/team", assistantController.team);

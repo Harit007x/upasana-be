@@ -45,6 +45,10 @@ app.use(
 
 app.use(cookieParser());
 
+// The Assistant sends its whole conversation, tool results included, with
+// every turn: far past the default 100 kB. Parsed here first, so the general
+// parser below leaves it alone.
+app.use("/api/admin/assistant", express.json({ limit: "2mb" }));
 app.use(express.json());
 
 app.use("/api", router);

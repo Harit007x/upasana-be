@@ -15,7 +15,11 @@ import {
   REGISTRATION_TYPES,
   STAY_DATES,
   TIME_SLOTS,
+  TRAIN_STATIONS,
   TRAVEL_MODES,
+  JOURNEY_MODES,
+  YOUTH_MAX_AGE,
+  isJourneyMode,
   compareStay,
   isLocalMandal,
   isVehiclePlate,
@@ -41,6 +45,15 @@ const stayPoint = z.object({
 });
 
 const text = (max: number) => z.string().trim().max(max);
+
+/**
+ * Whether the text has letters from a script other than English's: a name
+ * typed in Gujarati or Hindi. Names are kept in English letters only, so lists,
+ * search, sorting and the printed reports read the same however the form was
+ * filled in. Mirrors hasNonLatinLetters in the form (upasana-fe schema.ts).
+ */
+export const hasNonLatinLetters = (value: string) => /(?!\p{Script=Latin})\p{L}/u.test(value);
+const ENGLISH_LETTERS = "Write the name in English letters";
 const optionalText = (max: number) =>
   text(max)
     .optional()
@@ -60,8 +73,9 @@ const indiaFlight = z
   .optional();
 
 /**
- * A pickup from and a drop to Ahmedabad airport, for devotees from abroad.
- * Both optional; each one asked for needs its flight.
+ * A pickup from Ahmedabad airport and the flight out, for devotees from
+ * abroad. Both optional; a pickup needs its flight. No drop is arranged any
+ * more, so `needsDrop` is stored false and the flight out is for the record.
  */
 const indiaTravel = z
   .object({
@@ -74,16 +88,14 @@ const indiaTravel = z
     message: "Pick the day you land",
     path: ["arrival", "date"],
   })
-  .refine(t => !t.needsDrop || t.departure, {
-    message: "Pick the day you fly out",
-    path: ["departure", "date"],
-  })
   .optional();
 
 const member = z.object({
   /** The person's id from an earlier save, when editing; empty for someone new. */
   id: z.string().max(40).optional(),
-  fullName: text(120).min(2, "Enter the full name"),
+  fullName: text(120)
+    .min(2, "Enter the full name")
+    .refine(v => !hasNonLatinLetters(v), ENGLISH_LETTERS),
   gender: z.enum(GENDERS, { error: "Select a gender" }),
   age: z
     .number({ error: "Enter the age" })
@@ -104,6 +116,8 @@ const member = z.object({
   departure: stayPoint,
   /** Asks for a bed for this person. Absent: as `accommodationRequired` says for everyone. */
   needsAccommodation: z.boolean().optional(),
+  /** Aged YOUTH_MAX_AGE or under: whether they will attend the Youth Convention. Optional. */
+  attendsYouthConvention: z.boolean().optional(),
 });
 
 export const newRegistrationSchema = z
@@ -132,11 +146,28 @@ export const newRegistrationSchema = z
         .optional()
         .transform(v => v ?? []),
       reference: optionalText(80),
+      // Train only: when it reaches Ahmedabad, and at which station.
+      arrivalTime: z
+        .string()
+        .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Enter a time like 06:30")
+        .optional(),
+      station: z.enum(TRAIN_STATIONS, { error: "Pick a station from the list" }).optional(),
       needsPickup: z.boolean(),
       needsDrop: z
         .boolean()
         .optional()
         .transform(v => v ?? false),
+      // With a drop: how they leave (not always how they came), the train or
+      // bus home, its station (train only), and when it leaves.
+      departureMode: z.enum(JOURNEY_MODES).optional(),
+      departureReference: optionalText(80),
+      departureStation: z
+        .enum(TRAIN_STATIONS, { error: "Pick a station from the list" })
+        .optional(),
+      departureTime: z
+        .string()
+        .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Enter a time like 06:30")
+        .optional(),
     }),
     indiaTravel,
     accommodationRequired: z.boolean(),
@@ -163,6 +194,8 @@ export const newRegistrationSchema = z
     }
     if (value.type !== "individual" && !value.groupName) {
       issue(["groupName"], "Enter the family name");
+    } else if (value.groupName && hasNonLatinLetters(value.groupName)) {
+      issue(["groupName"], ENGLISH_LETTERS);
     }
     if (!value.members[0]?.mobile) {
       issue(["members", 0, "mobile"], "The primary contact needs a mobile number");
@@ -223,6 +256,46 @@ export const newRegistrationSchema = z
         seenPlates.add(normalizePlate(plate));
       });
     }
+    // A pickup or drop by train or bus needs its journey: the train's number,
+    // station and time, or the bus's details and time.
+    const t = value.travel;
+    if (!isLocalMandal(value.mandal) && isJourneyMode(t.mode)) {
+      if (t.needsPickup && t.needsDrop && !t.departureMode) {
+        issue(["travel", "departureMode"], "Select how you are leaving");
+      }
+      const legs = [
+        {
+          wanted: t.needsPickup,
+          mode: t.mode,
+          reference: "reference",
+          station: "station",
+          time: "arrivalTime",
+        },
+        {
+          wanted: t.needsPickup && t.needsDrop && !!t.departureMode,
+          mode: t.departureMode,
+          reference: "departureReference",
+          station: "departureStation",
+          time: "departureTime",
+        },
+      ] as const;
+      for (const leg of legs) {
+        if (!leg.wanted) continue;
+        const train = leg.mode === "train";
+        if (!t[leg.reference]?.trim()) {
+          issue(
+            ["travel", leg.reference],
+            train
+              ? "Enter the train number and name"
+              : leg.mode === "flight"
+                ? "Enter the flight number"
+                : "Enter the bus details"
+          );
+        }
+        if (train && !t[leg.station]) issue(["travel", leg.station], "Pick the station");
+        if (!t[leg.time]) issue(["travel", leg.time], "Pick the time");
+      }
+    }
     // Landing in India before reaching the event, leaving after it ends.
     const landing = value.indiaTravel?.arrival?.date;
     const leaving = value.indiaTravel?.departure?.date;
@@ -280,6 +353,7 @@ export function toCreateData(input: NewRegistrationInput, existingIds: readonly 
     isPrimary: index === 0,
     relation: input.type === "family" && index > 0 ? m.relation : null,
     assistanceNote: m.needsAssistance ? m.assistanceNote : null,
+    attendsYouthConvention: m.age <= YOUTH_MAX_AGE ? (m.attendsYouthConvention ?? null) : null,
     // Someone who leaves the day they arrive has no night here, so no bed.
     needsAccommodation:
       !local &&
@@ -302,8 +376,14 @@ export function toCreateData(input: NewRegistrationInput, existingIds: readonly 
           vehicleCount: null,
           vehicleNumbers: [],
           reference: null,
+          arrivalTime: null,
+          station: null,
           needsPickup: false,
           needsDrop: false,
+          departureMode: null,
+          departureReference: null,
+          departureStation: null,
+          departureTime: null,
         }
       : {
           ...input.travel,
@@ -313,12 +393,23 @@ export function toCreateData(input: NewRegistrationInput, existingIds: readonly 
             input.travel.mode === "personal_vehicle"
               ? input.travel.vehicleNumbers.filter(Boolean).map(n => n.toUpperCase())
               : [],
+          arrivalTime: (isJourneyMode(input.travel.mode) && input.travel.arrivalTime) || null,
+          station: (input.travel.mode === "train" && input.travel.station) || null,
+          // A pickup in Ahmedabad: by train or public bus (or flight, which is
+          // no longer offered but still accepted).
           needsPickup:
-            (input.travel.mode === "train" || input.travel.mode === "flight") &&
+            (input.travel.mode === "train" ||
+              input.travel.mode === "public_bus" ||
+              input.travel.mode === "flight") &&
             input.travel.needsPickup,
+          // A drop is offered only with a pickup.
           needsDrop:
-            (input.travel.mode === "train" || input.travel.mode === "flight") &&
+            (input.travel.mode === "train" ||
+              input.travel.mode === "public_bus" ||
+              input.travel.mode === "flight") &&
+            input.travel.needsPickup &&
             input.travel.needsDrop,
+          ...journeyHome(input.travel),
         },
     // True when anyone in the party has a bed coming; each person's own
     // answer is on them.
@@ -329,13 +420,28 @@ export function toCreateData(input: NewRegistrationInput, existingIds: readonly 
 }
 
 /**
- * The Ahmedabad airport pickup and drop as stored: only for an overseas
- * mandal that asked for either, with the flight for each one asked for.
+ * How they leave and the train or bus home, kept only with a drop; a station
+ * only when leaving by train.
+ */
+function journeyHome(travel: NewRegistrationInput["travel"]) {
+  const kept =
+    isJourneyMode(travel.mode) && travel.needsPickup && travel.needsDrop && !!travel.departureMode;
+  return {
+    departureMode: (kept && travel.departureMode) || null,
+    departureReference: (kept && travel.departureReference) || null,
+    departureStation: (kept && travel.departureMode === "train" && travel.departureStation) || null,
+    departureTime: (kept && travel.departureTime) || null,
+  };
+}
+
+/**
+ * The Ahmedabad airport pickup and flight out as stored: only for an overseas
+ * mandal that asked for a pickup or gave its flight out.
  */
 function indiaTravelRecord(input: NewRegistrationInput) {
   const india = input.indiaTravel;
   if (!india || !OVERSEAS_MANDALS.includes(input.mandal)) return null;
-  if (!india.needsPickup && !india.needsDrop) return null;
+  if (!india.needsPickup && !india.departure) return null;
   type Leg = NonNullable<typeof india.arrival>;
   const leg = (f?: Leg) =>
     f
@@ -344,8 +450,8 @@ function indiaTravelRecord(input: NewRegistrationInput) {
   return {
     needsPickup: india.needsPickup,
     arrival: india.needsPickup ? leg(india.arrival) : null,
-    needsDrop: india.needsDrop,
-    departure: india.needsDrop ? leg(india.departure) : null,
+    needsDrop: false,
+    departure: leg(india.departure),
   };
 }
 

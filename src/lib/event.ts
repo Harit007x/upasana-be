@@ -41,15 +41,40 @@ export const NIGHTS = STAY_DATES.slice(0, -1);
 /** "30 Jan" — for messages. */
 export function formatDay(iso: string) {
   const [y, m, d] = iso.split("-").map(Number);
-  return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", timeZone: "UTC" }).format(
-    new Date(Date.UTC(y, m - 1, d))
-  );
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(y, m - 1, d)));
 }
 
 export const TIME_SLOTS = ["morning", "afternoon", "evening"] as const;
 
+/** The ways of travelling a pickup and drop in Ahmedabad are offered for. Mirrors DROP_MODES on the frontend. */
+export const JOURNEY_MODES = ["train", "public_bus", "flight"] as const;
+export const isJourneyMode = (mode: string): mode is (typeof JOURNEY_MODES)[number] =>
+  (JOURNEY_MODES as readonly string[]).includes(mode);
+
+/** The oldest age asked whether they will attend the Youth Convention. Mirrors the frontend. */
+export const YOUTH_MAX_AGE = 40;
+
+/** The Ahmedabad stations a train can arrive at. Mirrors TRAIN_STATIONS on the frontend. */
+export const TRAIN_STATIONS = [
+  "Kalupur (Ahmedabad Junction)",
+  "Sabarmati",
+  "Chandlodiya",
+  "Maninagar",
+] as const;
+
 /** Mandals outside India. Mirrors OVERSEAS_MANDALS on the frontend. */
-export const OVERSEAS_MANDALS: readonly string[] = ["London (UK)", "New Jersey (USA)"];
+export const OVERSEAS_MANDALS: readonly string[] = [
+  "London (UK)",
+  "New Jersey (USA)",
+  "Canada",
+  "New Zealand",
+  "Australia",
+  "Dubai (UAE)",
+];
 
 export const MANDALS = [
   "Ahmedabad",
@@ -67,6 +92,10 @@ export const MANDALS = [
   "Delhi",
   "London (UK)",
   "New Jersey (USA)",
+  "Canada",
+  "New Zealand",
+  "Australia",
+  "Dubai (UAE)",
 ] as const;
 
 export const NO_MANDAL = "Not in a mandal";
@@ -131,9 +160,11 @@ export const REGISTRATION_STATUSES = ["pending", "confirmed", "checked_in", "can
 
 /**
  * Mobile numbers the form accepts, as E.164. Mirrors upasana-fe/src/lib/phone.ts:
- * India must start 6–9; every listed country has exactly ten national digits.
+ * India 6–9 then 9 digits; USA/Canada and UK 10 digits; Australia 4 + 8;
+ * New Zealand 2 + 7 to 9; UAE 5 + 8.
  */
-export const MOBILE_E164 = /^(\+91[6-9]\d{9}|\+1\d{10}|\+44\d{10})$/;
+export const MOBILE_E164 =
+  /^(\+91[6-9]\d{9}|\+1\d{10}|\+44\d{10}|\+614\d{8}|\+642\d{7,9}|\+9715\d{8})$/;
 
 export type StayPoint = { date: string; slot: string; meal?: boolean | null };
 

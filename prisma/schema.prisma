@@ -381,6 +381,9 @@ type RegistrationMember {
   isPrimary          Boolean
   needsAssistance    Boolean
   assistanceNote     String?
+  /// Aged 40 or under (YOUTH_MAX_AGE): whether they will attend the Youth
+  /// Convention. Optional, so null when not answered or not asked.
+  attendsYouthConvention Boolean?
   arrival            StayPoint
   departure          StayPoint
   /// Whether this person asked for a bed. Lets a family put up only some of
@@ -432,10 +435,21 @@ type Travel {
   vehicleNumbers String[]
   /// Train or flight number, or the bus operator.
   reference      String?
+  /// Train only: when it reaches Ahmedabad, "HH:MM", and at which station.
+  arrivalTime    String?
+  station        String?
+  /// Train or public bus (or flight, no longer offered): a pickup in Ahmedabad.
   needsPickup    Boolean
   /// Train or flight only: a drop to the station or airport when leaving.
   /// Optional because registrations from before it existed do not have it.
   needsDrop      Boolean?
+  /// With a drop: how they leave ("train" | "public_bus", not always how they
+  /// came), the train or bus home, its station (train only), and when it
+  /// leaves ("HH:MM").
+  departureMode      String?
+  departureReference String?
+  departureStation   String?
+  departureTime      String?
 }
 
 /// Somewhere devotees stay: a guest house now, hotels later. Its rooms are
@@ -713,4 +727,65 @@ model RegistrationChange {
   @@index([by])
   @@index([createdAt])
   @@map("registration_change")
+}
+
+/// One admin's conversation with the Assistant (/admin/assistant). Private to
+/// that admin. The whole chat is one document, with messages appended in place
+/// (`push`), so opening a chat is one read and a turn writes only what is new.
+///
+/// Deleted 30 days after it was last used, by a TTL index on `updatedAt`
+/// (scripts/ensure-partial-indexes.ts; Prisma cannot express one). The tool
+/// results inside hold devotees' names and numbers, so they do not stay for
+/// ever.
+model AssistantChat {
+  id     String @id @default(auto()) @map("_id") @db.ObjectId
+  userId String @db.ObjectId
+  /// The first question, shortened: how the chat is listed in History.
+  title  String
+
+  /// The conversation as the model reads it, append-only: thinking blocks and
+  /// tool results stay exactly as they were, or the next turn is refused.
+  messages  AssistantMessage[]
+  /// Questions asked, for the History list.
+  questions Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("assistant_chat")
+}
+
+type AssistantMessage {
+  /// "user" | "assistant"
+  role    String
+  /// Anthropic message content: a string, or an array of content blocks.
+  content Json
+  /// Display only, never sent to the model: the card each tool result made,
+  /// keyed by its `tool_use_id` (`Card` in upasana-fe/src/features/assistant/tools.ts).
+  cards   Json?
+  at      DateTime
+}
+
+/// "Recently asked by the team": a card one admin's question produced, for the
+/// others to open with live data and no model call. One entry per recipe —
+/// the same report asked again moves to the top with the latest question.
+/// Deleted 30 days after it was last asked (TTL on `askedAt`).
+model AssistantAsk {
+  id    String @id @default(auto()) @map("_id") @db.ObjectId
+  /// SHA-256 of the card's recipe without its title, so "Train arrivals · 29
+  /// Jan" and "Train arrivals on 29 Jan" are the same entry.
+  key   String @unique
+  /// The question as last asked.
+  question String
+  title    String
+  /// The card's recipe; whoever opens it recomputes it from current data.
+  card     Json
+
+  askedById   String   @db.ObjectId
+  askedByName String
+  askedAt     DateTime
+  timesAsked  Int      @default(1)
+
+  @@map("assistant_ask")
 }
