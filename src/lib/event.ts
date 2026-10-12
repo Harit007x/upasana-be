@@ -73,7 +73,6 @@ export const OVERSEAS_MANDALS: readonly string[] = [
 export const MANDALS = [
   "Ahmedabad",
   "Dahegam",
-  "Naroda",
   "Gandhinagar",
   "Surat",
   "Vadodara",
@@ -99,7 +98,7 @@ export const NO_MANDAL = "Not in a mandal";
  * these. Not asked about travel or a bed; stored as travel "local", no beds.
  * Mirrors isLocalMandal in upasana-fe/src/config/event.ts.
  */
-const LOCAL_MANDALS: readonly string[] = ["Dahegam", "Naroda", "Gandhinagar", "Vadodara", "Rajkot"];
+const LOCAL_MANDALS: readonly string[] = ["Dahegam", "Gandhinagar"];
 export const isLocalMandal = (mandal: string) =>
   mandal.startsWith("Ahmedabad") || LOCAL_MANDALS.includes(mandal);
 
@@ -149,6 +148,9 @@ export const TRAVEL_MODES = [
   "other",
   // Set for local mandals, never picked.
   "local",
+  // Set on registrations whose mandal stopped being local before they gave
+  // travel details; never picked, so the next edit has to choose a mode.
+  "not_filled",
 ] as const;
 export const REGISTRATION_STATUSES = ["pending", "confirmed", "checked_in", "cancelled"] as const;
 

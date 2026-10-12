@@ -8,7 +8,6 @@ import {
   MOBILE_E164,
   MAX_VEHICLES,
   MIN_FAMILY_CONTACT_AGE,
-  NO_MANDAL,
   OVERSEAS_MANDALS,
   RELATION_GENDER,
   REGISTRATION_STATUSES,
@@ -168,7 +167,7 @@ export const newRegistrationSchema = z
   .object({
     type: z.enum(REGISTRATION_TYPES, { error: "Choose individual or family" }),
     groupName: optionalText(120),
-    mandal: z.enum([...MANDALS, NO_MANDAL], { error: "Select a mandal from the list" }),
+    mandal: z.enum(MANDALS, { error: "Select a mandal from the list" }),
     // A cap well above any real party, so one request cannot store megabytes.
     members: z.array(member).min(1).max(100),
     arrival: stayPoint,
@@ -277,7 +276,10 @@ export const newRegistrationSchema = z
       );
     }
     // "local" is set for nearby mandals, not chosen by anyone else.
-    if (value.travel.mode === "local" && !isLocalMandal(value.mandal)) {
+    if (
+      value.travel.mode === "not_filled" ||
+      (value.travel.mode === "local" && !isLocalMandal(value.mandal))
+    ) {
       issue(["travel", "mode"], "Select how you are travelling");
     }
     if (value.travel.mode === "personal_vehicle") {
