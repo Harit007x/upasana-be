@@ -16,9 +16,10 @@ import {
 
 const stay = { date: "2027-01-29", slot: "morning", meal: true };
 const leave = { date: "2027-01-30", slot: "evening", meal: true };
-/** "Ramesh Patel" as the form sends it: first name and surname. */
+/** "Ramesh Patel" as the form sends it, with a middle name when the name has none. */
 const person = (name: string, extra: object = {}) => ({
   ...splitFullName(name),
+  ...(name.trim().split(/\s+/).length < 3 ? { middleName: "Kantilal" } : {}),
   gender: "male",
   age: 40,
   isPrimary: false,
@@ -67,7 +68,7 @@ describe("names on a registration", () => {
     expect(messagesAt(input, "members.0.surname")).toContain("Write the name in English letters");
   });
 
-  it("asks for the first name and surname, but not the middle name", () => {
+  it("asks for the first, middle and surname", () => {
     const contact = { isPrimary: true, mobile: "+919876543210" };
     const noSurname = registration({ members: [person("Ramesh", contact)] });
     expect(messagesAt(noSurname, "members.0.surname")).toEqual(["Enter the surname"]);
@@ -75,6 +76,12 @@ describe("names on a registration", () => {
       members: [{ ...person("Ramesh Patel", contact), firstName: " " }],
     });
     expect(messagesAt(noFirst, "members.0.firstName")).toEqual(["Enter the first name"]);
+    for (const middleName of [" ", null, undefined]) {
+      const noMiddle = registration({
+        members: [{ ...person("Ramesh Patel", contact), middleName }],
+      });
+      expect(messagesAt(noMiddle, "members.0.middleName")).toEqual(["Enter the middle name"]);
+    }
     expect(newRegistrationSchema.safeParse(registration()).success).toBe(true);
   });
 

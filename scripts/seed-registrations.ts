@@ -8,7 +8,6 @@
  */
 import "../src/env";
 
-import { formatRegistrationCode } from "../src/lib/event";
 import { SAMPLE_COUNT, insertSampleRegistrations } from "../src/lib/sample-registrations";
 import { prisma } from "../src/utils/db";
 
@@ -27,7 +26,7 @@ async function main() {
     return;
   }
   console.log(
-    `Added ${added} sample registrations (${formatRegistrationCode(1)} to ${formatRegistrationCode(SAMPLE_COUNT)}); ` +
+    `Added ${added} sample registrations (numbered DMS-…); ` +
       `${SAMPLE_COUNT - added} were already there.`
   );
 }

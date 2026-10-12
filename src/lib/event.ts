@@ -23,8 +23,12 @@ export const EVENT_NAME = "Youth Convention 2026";
 /** The event days, 29 Jan – 1 Feb 2027. Calendar days at the venue, no time zone. Mirrors `EVENT.days` on the frontend. */
 export const EVENT_DAYS = ["2027-01-29", "2027-01-30", "2027-01-31", "2027-02-01"] as const;
 
-/** Days a guest may arrive or leave: the event days only. */
-export const STAY_DATES = EVENT_DAYS;
+/** Days a guest may arrive: the day before the event, and the event days. Mirrors the frontend. */
+export const ARRIVAL_DATES = ["2027-01-28", ...EVENT_DAYS] as const;
+/** Days a guest may leave: the event days only. */
+export const DEPARTURE_DATES = EVENT_DAYS;
+/** Every day a guest can be here, first to last. */
+export const STAY_DATES = ARRIVAL_DATES;
 
 /**
  * Nights someone can need a bed: every stay date but the last, since nobody
@@ -170,7 +174,13 @@ export function compareStay(a: StayPoint, b: StayPoint) {
   return TIME_SLOTS.indexOf(a.slot as never) - TIME_SLOTS.indexOf(b.slot as never);
 }
 
-/** "YC-0101" for the first registration. */
-export function formatRegistrationCode(sequence: number) {
-  return `YC-${(100 + sequence).toString().padStart(4, "0")}`;
-}
+/**
+ * Registration numbers (src/lib/registration-codes.ts). Every person gets
+ * their own, "DM-0101" for the first; a family registration as a whole also
+ * gets one, "DM-F-0101" for the first family. The dummy registrations use
+ * "DMS-" instead, so they can never take a real person's number.
+ */
+const numbered = (n: number) => (100 + n).toString().padStart(4, "0");
+export const formatPersonCode = (n: number, sample = false) => `${sample ? "DMS" : "DM"}-${numbered(n)}`;
+export const formatFamilyCode = (n: number, sample = false) => `${sample ? "DMS" : "DM"}-F-${numbered(n)}`;
+export const isFamilyCode = (code: string) => /^DMS?-F-/.test(code);

@@ -3,8 +3,9 @@
  *
  * Generated from a fixed seed: the same bookings every time. None of these
  * people are real; the names are common Gujarati names picked at random.
- * They take sequences 1–64 (YC-0101 to YC-0164) and are flagged `isSample`,
- * so removing them can never touch a real registration.
+ * They take sequences 1–64, are numbered "DMS-" (DMS-0101 for the first
+ * person, DMS-F-0101 for the first family) rather than "DM-", and are flagged
+ * `isSample`, so removing them can never touch a real registration.
  *
  * Used by the admin toggle (adminSampleDataController) and by
  * `pnpm seed:registrations`.
@@ -18,10 +19,10 @@ import {
   EVENT_DAYS,
   MANDALS,
   OVERSEAS_MANDALS,
-  STAY_DATES,
   TRAIN_STATIONS,
   YOUTH_MAX_AGE,
-  formatRegistrationCode,
+  formatFamilyCode,
+  formatPersonCode,
   isLocalMandal,
   type StayPoint,
 } from "./event";
@@ -32,6 +33,8 @@ type Gender = "male" | "female";
 type Member = {
   id: string;
   firstName: string;
+  /** The father's (or husband's) name, as Gujarati names go. */
+  middleName: string;
   surname: string;
   gender: Gender;
   age: number;
@@ -49,6 +52,8 @@ type SeedFlight = { date: string; time: string; flight: string };
 type SeedRegistration = {
   sequence: number;
   code: string;
+  /** Each person's number, in `members` order. */
+  memberCodes: string[];
   type: string;
   groupName?: string;
   mandal: string;
@@ -275,8 +280,8 @@ export function buildSampleRegistrations(): SeedRegistration[] {
     const roll = rand();
     if (abroad || roll < 0.35) {
       return [
-        stay(STAY_DATES[0], "evening"),
-        stay(STAY_DATES[STAY_DATES.length - 1], pick(["morning", "afternoon"] as const)),
+        stay(EVENT_DAYS[0], "evening"),
+        stay(EVENT_DAYS[EVENT_DAYS.length - 1], pick(["morning", "afternoon"] as const)),
       ];
     }
     if (roll < 0.7) {
@@ -308,6 +313,7 @@ export function buildSampleRegistrations(): SeedRegistration[] {
     return {
       id: `m${index}`,
       isPrimary: false,
+      middleName: pick(MALE_NAMES),
       ...fields,
       mobile: fields.isPrimary
         ? contactMobile(currentMandal)
@@ -484,6 +490,7 @@ export function buildSampleRegistrations(): SeedRegistration[] {
     registrations.push({
       sequence: 0,
       code: "",
+      memberCodes: [],
       type,
       groupName,
       mandal,
@@ -580,9 +587,15 @@ export function buildSampleRegistrations(): SeedRegistration[] {
 
   // Codes go out in the order people registered, as they would on the server.
   registrations.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  let people = 0;
+  let families = 0;
   registrations.forEach((registration, index) => {
     registration.sequence = index + 1;
-    registration.code = formatRegistrationCode(index + 1);
+    registration.memberCodes = registration.members.map(() => formatPersonCode(++people, true));
+    registration.code =
+      registration.type === "family"
+        ? formatFamilyCode(++families, true)
+        : registration.memberCodes[0];
   });
 
   // Newest first, the way the list shows them.
@@ -617,6 +630,7 @@ export async function insertSampleRegistrations() {
     const {
       sequence,
       code,
+      memberCodes,
       status,
       source,
       createdAt,
@@ -625,9 +639,11 @@ export async function insertSampleRegistrations() {
       ...input
     } = sample;
     // The same check and shaping as POST /registrations.
+    const data = toCreateData(newRegistrationSchema.parse(input));
     await prisma.registration.create({
       data: {
-        ...toCreateData(newRegistrationSchema.parse(input)),
+        ...data,
+        members: data.members.map((m, index) => ({ ...m, code: memberCodes[index] })),
         sequence,
         code,
         status,

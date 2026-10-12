@@ -12,7 +12,8 @@ import {
   RELATION_GENDER,
   REGISTRATION_STATUSES,
   REGISTRATION_TYPES,
-  STAY_DATES,
+  ARRIVAL_DATES,
+  DEPARTURE_DATES,
   TIME_SLOTS,
   TRAIN_STATIONS,
   TRAVEL_MODES,
@@ -36,12 +37,15 @@ import {
  * would refuse has to be refused here too.
  */
 
-const stayPoint = z.object({
-  date: z.enum(STAY_DATES, { error: "Pick a day between 29 January and 1 February" }),
-  slot: z.enum(TIME_SLOTS, { error: "Pick a time of day" }),
-  // Whether they take the meal served then: breakfast, lunch or dinner.
-  meal: z.boolean({ error: "Say whether you will take the meal" }),
-});
+const stayPoint = (dates: readonly [string, ...string[]], error: string) =>
+  z.object({
+    date: z.enum(dates, { error }),
+    slot: z.enum(TIME_SLOTS, { error: "Pick a time of day" }),
+    // Whether they take the meal served then: breakfast, lunch or dinner.
+    meal: z.boolean({ error: "Say whether you will take the meal" }),
+  });
+const arrivalPoint = stayPoint(ARRIVAL_DATES, "Pick an arrival day between 28 January and 1 February");
+const departurePoint = stayPoint(DEPARTURE_DATES, "Pick a departure day between 29 January and 1 February");
 
 const text = (max: number) => z.string().trim().max(max);
 
@@ -133,10 +137,11 @@ const member = z.preprocess(
     /** The person's id from an earlier save, when editing; empty for someone new. */
     id: z.string().max(40).optional(),
     firstName: namePart(60).pipe(z.string().min(1, "Enter the first name")),
-    middleName: namePart(60)
-      .optional()
-      .nullable()
-      .transform(v => (v ? v : null)),
+    // Missing on an old one-line name of two words, split above.
+    middleName: z.preprocess(
+      v => v ?? "",
+      namePart(60).pipe(z.string().min(1, "Enter the middle name"))
+    ),
     surname: namePart(60).pipe(z.string().min(1, "Enter the surname")),
     gender: z.enum(GENDERS, { error: "Select a gender" }),
     age: z
@@ -154,8 +159,8 @@ const member = z.preprocess(
     isPrimary: z.boolean(),
     needsAssistance: z.boolean(),
     assistanceNote: optionalText(300),
-    arrival: stayPoint,
-    departure: stayPoint,
+    arrival: arrivalPoint,
+    departure: departurePoint,
     /** Asks for a bed for this person. Absent: as `accommodationRequired` says for everyone. */
     needsAccommodation: z.boolean().optional(),
     /** Aged YOUTH_MAX_AGE or under: whether they will attend the Youth Convention. Optional. */
@@ -170,8 +175,8 @@ export const newRegistrationSchema = z
     mandal: z.enum(MANDALS, { error: "Select a mandal from the list" }),
     // A cap well above any real party, so one request cannot store megabytes.
     members: z.array(member).min(1).max(100),
-    arrival: stayPoint,
-    departure: stayPoint,
+    arrival: arrivalPoint,
+    departure: departurePoint,
     travel: z.object({
       mode: z.enum(TRAVEL_MODES, { error: "Select how you are travelling" }),
       vehicleCount: z

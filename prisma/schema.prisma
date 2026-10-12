@@ -291,9 +291,11 @@ model PhoneVerification {
 /// string "enums" live in src/lib/event.ts and are checked on the way in.
 model Registration {
   id       String @id @default(auto()) @map("_id") @db.ObjectId
-  /// Human-facing code on the confirmation screen, e.g. YC-0142.
+  /// Human-facing number on the confirmation screen: the family number
+  /// ("DM-F-0031") for a family, the person's own number ("DM-0142") for an
+  /// individual. See src/lib/registration-codes.ts.
   code     String @unique
-  /// The number behind `code`, from the atomic counter in registrationController.
+  /// Orders registrations; from the "registration" counter (registration-codes.ts).
   sequence Int    @unique
 
   /// "individual" | "family"
@@ -371,6 +373,9 @@ type RegistrationMember {
   /// keyed on it. Older registrations have "m0", "m1", …; new people get a
   /// random one.
   id                 String
+  /// The person's own registration number, e.g. "DM-0142". Kept while they
+  /// stay on the registration. Set on everyone since 13 Oct 2026.
+  code               String?
   /// The parts below joined ("Ramesh Kantilal Patel"): what lists, search
   /// and reports show.
   fullName           String

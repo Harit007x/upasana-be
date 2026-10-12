@@ -3,10 +3,11 @@ import { Request, Response } from "express";
 import { z } from "zod";
 import { Prisma, type Registration } from "@prisma/client";
 
-import { MOBILE_E164, formatRegistrationCode } from "../lib/event";
+import { MOBILE_E164 } from "../lib/event";
 // PAUSED 2026-10-11 — per-person room allotment (rooms now go to mandals).
 // import { releaseStaleAllotments, stayForDevotee } from "../lib/allotments";
 import { MOBILE_OTP_REQUIRED, consumeVerificationToken, peekVerificationToken } from "../lib/otp";
+import { takeNumbers, withCodes } from "../lib/registration-codes";
 import { recordChange } from "../lib/registration-changes";
 import {
   newRegistrationSchema,
@@ -28,35 +29,6 @@ import { prisma } from "../utils/db";
  * for a sanchalak (`registrationScope`); status changes also need
  * `requireReviewer`.
  */
-
-/**
- * The next registration number, from a single counter document.
- *
- * `findAndModify` with `$inc` and `upsert` is one atomic step on the server, so
- * two devotees submitting in the same instant still get different codes.
- * Counting the collection instead would hand both of them the same one. Raw,
- * because Prisma's own upsert is a read followed by a write.
- */
-async function nextSequence(): Promise<number> {
-  const result = (await prisma.$runCommandRaw({
-    findAndModify: "counter",
-    query: { _id: "registration" },
-    update: { $inc: { value: 1 } },
-    upsert: true,
-    new: true,
-  })) as { value?: { value?: unknown } };
-
-  // Raw results come back as extended JSON: a plain number for an int32, but
-  // `{ $numberLong: "65" }` if the counter was ever written as a 64-bit int.
-  const raw = result.value?.value;
-  const value =
-    typeof raw === "number"
-      ? raw
-      : Number((raw as { $numberLong?: string; $numberInt?: string })?.$numberLong ??
-          (raw as { $numberInt?: string })?.$numberInt);
-  if (!Number.isInteger(value)) throw new Error("Registration counter returned no value");
-  return value;
-}
 
 /** Answers 400 with every field problem, in the shape the frontend can show. */
 function validationError(res: Response, issues: { path: PropertyKey[]; message: string }[]) {
@@ -184,16 +156,15 @@ const create = async (req: Request, res: Response): Promise<void> => {
   // A team member at the desk, or a devotee on the public form. Only a desk
   // role counts: a plain signed-in account is still "self".
   const atDesk = DESK_ROLES.has(req.user?.role);
-  const sequence = await nextSequence();
+  const [sequence] = await takeNumbers("registration", 1);
 
   let registration: Registration;
   try {
     registration = await prisma.registration.create({
       data: {
-        ...toCreateData(parsed.data),
+        ...(await withCodes(toCreateData(parsed.data))),
         ...verification,
         sequence,
-        code: formatRegistrationCode(sequence),
         status: "pending",
         source: atDesk ? "staff" : "self",
         createdById: atDesk ? req.user.id : null,
@@ -298,7 +269,7 @@ const update = async (req: Request, res: Response): Promise<void> => {
     registration = await prisma.registration.update({
       where: { id },
       data: {
-        ...toCreateData(parsed.data, existing.members.map((m) => m.id)),
+        ...(await withCodes(toCreateData(parsed.data, existing.members.map((m) => m.id)), existing)),
         ...(verification === "unchanged" ? {} : verification),
         editedAt: new Date(),
         editedByName: req.user.name,
@@ -404,7 +375,7 @@ const updateSelf = async (req: Request, res: Response): Promise<void> => {
   const registration = await prisma.registration.update({
     where: { id },
     data: {
-      ...toCreateData(parsed.data, existing.members.map((m) => m.id)),
+      ...(await withCodes(toCreateData(parsed.data, existing.members.map((m) => m.id)), existing)),
       editedAt: new Date(),
       editedByName: "the devotee",
     },

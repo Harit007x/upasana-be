@@ -27,7 +27,7 @@ const querySchema = z.object({
   page: z.coerce.number().int().min(1).max(10_000).catch(1),
 });
 
-/** Regex metacharacters escaped, so a search for "YC-0.1" means just that. */
+/** Regex metacharacters escaped, so a search for "DM-0.1" means just that. */
 const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const list = async (req: Request, res: Response): Promise<void> => {

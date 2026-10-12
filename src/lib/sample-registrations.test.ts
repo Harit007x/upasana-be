@@ -18,6 +18,7 @@ const samples = buildSampleRegistrations();
 const inputOf = ({
   sequence: _sequence,
   code: _code,
+  memberCodes: _memberCodes,
   status: _status,
   source: _source,
   createdAt: _createdAt,
@@ -35,6 +36,11 @@ describe("sample registrations", () => {
   it("are the advertised number, with unique codes and contact numbers", () => {
     expect(samples).toHaveLength(SAMPLE_COUNT);
     expect(new Set(samples.map(s => s.code)).size).toBe(SAMPLE_COUNT);
+    const people = samples.flatMap(s => s.memberCodes);
+    expect(new Set(people).size).toBe(people.length);
+    expect(samples.flatMap(s => s.members)).toHaveLength(people.length);
+    for (const s of samples)
+      expect(s.code).toEqual(s.type === "family" ? expect.stringMatching(/^DMS-F-\d{4}$/) : s.memberCodes[0]);
     expect(new Set(samples.map(s => s.members[0].mobile)).size).toBe(SAMPLE_COUNT);
   });
 
