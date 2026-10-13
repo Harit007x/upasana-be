@@ -66,33 +66,61 @@ export const TRAIN_STATIONS = [
 
 /** Mandals outside India. Mirrors OVERSEAS_MANDALS on the frontend. */
 export const OVERSEAS_MANDALS: readonly string[] = [
-  "London (UK)",
-  "New Jersey (USA)",
+  "UK",
+  "USA",
   "Canada",
-  "New Zealand",
   "Australia",
-  "Dubai (UAE)",
+  "New Zealand",
+  "Dubai",
+  "France",
+  "Kenya",
 ];
 
 export const MANDALS = [
   "Ahmedabad",
-  "Dahegam",
   "Gandhinagar",
-  "Surat",
-  "Vadodara",
-  "Rajkot",
-  "Bhavnagar",
+  "Dehgam",
+  "SabarKantha",
+  "Sathamba",
+  "Nadiad",
+  "Khambhat",
   "Anand",
-  "Jamnagar",
+  "Vidyanagar",
+  "Mogri",
+  "Baroda",
+  "Vemar",
+  "Ankleshwar",
+  "Surat",
+  "Barasadi",
   "Mumbai",
   "Pune",
+  "Hyderabad",
+  "Chennai",
+  "Kochi",
+  "Morbi",
+  "Dhari",
+  "Bhingrad",
+  "Manavadar",
+  "Rajkot",
+  "Junagadh",
+  "Bhavnagar",
+  "Rajpipla",
+  "Jasdan",
   "Delhi",
-  "London (UK)",
-  "New Jersey (USA)",
+  "South Gujarat",
+  "North Gujarat",
+  "Central Gujarat",
+  "Kutch-Saurashtra",
+  "Charotar Pradesh",
+  "Kanam Pradesh",
+  "UK",
+  "USA",
   "Canada",
-  "New Zealand",
   "Australia",
-  "Dubai (UAE)",
+  "New Zealand",
+  "Dubai",
+  "France",
+  "Kenya",
 ] as const;
 
 export const NO_MANDAL = "Not in a mandal";
@@ -102,7 +130,7 @@ export const NO_MANDAL = "Not in a mandal";
  * these. Not asked about travel or a bed; stored as travel "local", no beds.
  * Mirrors isLocalMandal in upasana-fe/src/config/event.ts.
  */
-const LOCAL_MANDALS: readonly string[] = ["Dahegam", "Gandhinagar"];
+const LOCAL_MANDALS: readonly string[] = ["Dehgam", "Gandhinagar"];
 export const isLocalMandal = (mandal: string) =>
   mandal.startsWith("Ahmedabad") || LOCAL_MANDALS.includes(mandal);
 
@@ -156,7 +184,15 @@ export const TRAVEL_MODES = [
   // travel details; never picked, so the next edit has to choose a mode.
   "not_filled",
 ] as const;
-export const REGISTRATION_STATUSES = ["pending", "confirmed", "checked_in", "cancelled"] as const;
+/**
+ * "confirmed" is every registration that is neither checked in nor cancelled,
+ * shown as "Registered": there is no review step. Registrations saved before
+ * that may still say "pending"; they are read as "confirmed" (statusOf).
+ */
+export const REGISTRATION_STATUSES = ["confirmed", "checked_in", "cancelled"] as const;
+
+/** A stored status as it is shown: the old "pending" is "confirmed". */
+export const statusOf = (stored: string) => (stored === "pending" ? "confirmed" : stored);
 
 /**
  * Mobile numbers the form accepts, as E.164. Mirrors upasana-fe/src/lib/phone.ts:

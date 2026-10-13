@@ -1,6 +1,7 @@
 import type { Prisma, Registration, RegistrationChange } from "@prisma/client";
 
 import { prisma } from "../utils/db";
+import { statusOf } from "./event";
 import { toRegistrationDto } from "./registrations";
 
 /**
@@ -67,7 +68,7 @@ export function toChangeDto(c: RegistrationChange) {
     mandal: c.mandal,
     by: c.by,
     byName: c.byName ?? undefined,
-    status: c.status,
+    status: statusOf(c.status),
     before: c.before,
     after: c.after,
     createdAt: c.createdAt.toISOString(),

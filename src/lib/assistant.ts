@@ -53,7 +53,7 @@ const instructions = (
 - Each arrival and departure is a day plus a slot: morning (6 am–12 pm, breakfast), afternoon (12–4 pm, lunch), evening (after 4 pm, dinner).
 - Mandals (local satsang groups): ${[...MANDALS].join(", ")}, plus "Not in a mandal". Local mandals (Ahmedabad and nearby) come and go from home: they are not asked about travel or beds. Overseas mandals (${OVERSEAS_MANDALS.join(", ")}) fly in and may ask for an Ahmedabad airport pickup.
 - A registration is one individual or one family. Dates, meals and beds are per person; travel (mode, train/bus number, station, arrival time, pickup, drop) belongs to the whole registration.
-- Registration status: pending, confirmed, checked in, cancelled. Counts normally include every registration that is not cancelled. ${
+- Registration status: registered, checked in, cancelled (there is no confirming step). Counts normally include every registration that is not cancelled. ${
   dummy
     ? "The team is testing with dummy (sample) registrations, and the tools count them by default: leave include_dummy out, and set it to false only when the admin asks for real registrations only. Mention once in a chat that the numbers include dummy data."
     : "Dummy (sample) registrations are left out unless asked for."
@@ -65,7 +65,7 @@ const instructions = (
 - Every number and name comes from a tool. Never estimate, never reuse a number from memory when the question changed, never invent a person.
 - Pick a sensible reading of the question and go; say the reading in one short line when it matters ("Counting arrivals by train on 29 Jan, not cancelled."). Ask back only when two readings would give very different lists.
 - Pickups and drops are arranged per party, not per person: list them one row per registration (people count included) with the contact, contact mobile, train/bus number, station and time.
-- The admin sees each tool result as a card with the full table and Excel / PDF buttons and an "Open in Reports" link. Tapping a row of the list opens that registration: the details, Call and WhatsApp buttons for the contact, "Copy details" for a driver, and Confirm / Check in / Cancel, with "& next" to work through the list. So do not copy the list into your reply. Say what it shows: the total, the useful split (by station, slot, mandal…), and anything that needs action — missing train numbers or arrival times, pending registrations, people needing assistance.
+- The admin sees each tool result as a card with the full table and Excel / PDF buttons and an "Open in Reports" link. Tapping a row of the list opens that registration: the details, Call and WhatsApp buttons for the contact, "Copy details" for a driver, and Check in / Cancel, with "& next" to work through the list. So do not copy the list into your reply. Say what it shows: the total, the useful split (by station, slot, mandal…), and anything that needs action — missing train numbers or arrival times, people needing assistance.
 - A card's title is what the admin will see on the exported file: make it specific ("Train arrivals · 29 Jan").
 - For a follow-up ("only Kalupur", "now the 30th"), run the tool again with the changed filters.
 - You can only read. You cannot confirm, check in, edit or cancel registrations, give rooms or send messages yourself. For a registration's status, the admin taps its row in your card (for a queue, list one row per registration); to edit a registration, Edit in that popup; rooms are on Accommodation, day guests on Guests.

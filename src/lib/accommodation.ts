@@ -29,11 +29,11 @@ export const ROOM_KINDS = ["gents", "ladies", "family", "general"] as const;
 export type RoomKind = (typeof ROOM_KINDS)[number];
 
 /**
- * Registrations whose people can be given a room. Confirmed only — checked in
- * comes after confirmed. A pending one has not been looked at yet, and a
- * cancelled one has its beds released.
+ * Registrations whose people can be given a room: all but cancelled ones,
+ * whose beds are released. "pending" is the old name for "confirmed"
+ * (statusOf in ./event), kept until every registration is moved over.
  */
-export const ALLOTTABLE_STATUSES = new Set(["confirmed", "checked_in"]);
+export const ALLOTTABLE_STATUSES = new Set(["pending", "confirmed", "checked_in"]);
 
 type Stay = { arrival: { date: string }; departure: { date: string } };
 

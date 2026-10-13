@@ -186,11 +186,10 @@ const PLATE_PREFIX: Record<string, string> = {
   Ahmedabad: "GJ-01",
   Gandhinagar: "GJ-18",
   Surat: "GJ-05",
-  Vadodara: "GJ-06",
+  Baroda: "GJ-06",
   Rajkot: "GJ-03",
   Bhavnagar: "GJ-04",
   Anand: "GJ-23",
-  Jamnagar: "GJ-10",
   Mumbai: "MH-02",
   Pune: "MH-12",
   Delhi: "DL-3C",
@@ -231,15 +230,15 @@ export function buildSampleRegistrations(): SeedRegistration[] {
   const between = (min: number, max: number) => min + Math.floor(rand() * (max - min + 1));
   const chance = (p: number) => rand() < p;
   const mobile = (mandal: string) =>
-    mandal === "London (UK)"
+    mandal === "UK"
       ? `+447${between(100000000, 999999999)}`
-      : mandal === "New Jersey (USA)" || mandal === "Canada"
+      : mandal === "USA" || mandal === "Canada"
         ? `+1${between(201, 989)}${between(1000000, 9999999)}`
         : mandal === "Australia"
           ? `+614${between(10000000, 99999999)}`
           : mandal === "New Zealand"
             ? `+6421${between(1000000, 9999999)}`
-            : mandal === "Dubai (UAE)"
+            : mandal === "Dubai"
               ? `+9715${between(10000000, 99999999)}`
               : `+919${between(100000000, 999999999)}`;
 
@@ -464,7 +463,7 @@ export function buildSampleRegistrations(): SeedRegistration[] {
         "mandal_bus",
       ] as const);
 
-    const status: RegistrationStatus = i < 4 ? "cancelled" : chance(0.3) ? "pending" : "confirmed";
+    const status: RegistrationStatus = i < 4 ? "cancelled" : "confirmed";
 
     const createdDay = between(1, 39);
     const createdAt = new Date(

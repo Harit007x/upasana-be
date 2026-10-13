@@ -165,7 +165,7 @@ const create = async (req: Request, res: Response): Promise<void> => {
         ...(await withCodes(toCreateData(parsed.data))),
         ...verification,
         sequence,
-        status: "pending",
+        status: "confirmed",
         source: atDesk ? "staff" : "self",
         createdById: atDesk ? req.user.id : null,
       },
@@ -329,8 +329,7 @@ const LOCKED_FOR_SELF = new Set(["checked_in", "cancelled"]);
 /**
  * Public: a devotee editing their own registration, proven by an OTP token for
  * its primary contact's number (spent here). The contact number itself stays
- * — changing it is for the desk. The status stays as it is, confirmed
- * included; every change is logged for admins (Logs screen) instead.
+ * — changing it is for the desk. The status stays as it is; every change is logged for admins (Logs screen) instead.
  */
 const updateSelf = async (req: Request, res: Response): Promise<void> => {
   const id = String(req.params.id);

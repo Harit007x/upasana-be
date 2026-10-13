@@ -129,7 +129,7 @@ registrationRouter.get("/:id", getOne);
  * @openapi
  * /registrations/{id}/status:
  *   patch:
- *     summary: Confirm, check in, cancel or restore a registration
+ *     summary: Check in, cancel or restore a registration
  *     tags: [Registrations]
  *     parameters:
  *       - in: path
@@ -144,7 +144,8 @@ registrationRouter.get("/:id", getOne);
  *             properties:
  *               status:
  *                 type: string
- *                 enum: [pending, confirmed, checked_in, cancelled]
+ *                 enum: [confirmed, checked_in, cancelled]
+ *                 description: confirmed is shown as "Registered"
  *     responses:
  *       200:
  *         description: The updated registration

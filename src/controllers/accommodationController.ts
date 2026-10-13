@@ -522,10 +522,7 @@ const allot = async (req: Request, res: Response): Promise<void> => {
     res.status(409).json({
       success: false,
       code: "NOT_CONFIRMED",
-      message:
-        registration.status === "cancelled"
-          ? `${registration.code} is cancelled.`
-          : `Confirm ${registration.code} before giving it rooms.`,
+      message: `${registration.code} is cancelled.`,
     });
     return;
   }

@@ -11,6 +11,7 @@ import {
   OVERSEAS_MANDALS,
   RELATION_GENDER,
   REGISTRATION_STATUSES,
+  statusOf,
   REGISTRATION_TYPES,
   ARRIVAL_DATES,
   DEPARTURE_DATES,
@@ -554,7 +555,7 @@ export function toRegistrationDto(r: Registration) {
     },
     accommodationRequired: r.accommodationRequired,
     notes: r.notes,
-    status: r.status,
+    status: statusOf(r.status),
     source: r.source,
     isSample: r.isSample,
     createdAt: r.createdAt.toISOString(),
@@ -575,7 +576,7 @@ export function toRegistrationSummary(r: Registration, canOpen: boolean) {
     code: r.code,
     name: r.groupName ?? r.members[0]?.fullName ?? "",
     people: r.members.length,
-    status: r.status,
+    status: statusOf(r.status),
     mandal: r.mandal,
   };
 }

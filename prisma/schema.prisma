@@ -316,8 +316,9 @@ model Registration {
   accommodationRequired Boolean
   notes                 String?
 
-  /// "pending" | "confirmed" | "checked_in" | "cancelled"
-  status   String  @default("pending")
+  /// "confirmed" (shown as "Registered") | "checked_in" | "cancelled".
+  /// Older ones may say "pending", read as "confirmed" (statusOf in src/lib/event.ts).
+  status   String  @default("confirmed")
   /// One of the 64 made-up registrations for demos (src/lib/sample-registrations.ts).
   /// Admins add and remove them all at once from the Registrations screen;
   /// removing deletes only these, never a real registration.
