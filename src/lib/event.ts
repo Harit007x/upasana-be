@@ -18,7 +18,7 @@ export function roleDescription(role: string, mandal?: string | null) {
 }
 
 /** Shown in WhatsApp messages. Matches `EVENT.name` on the frontend. */
-export const EVENT_NAME = "Youth Convention 2026";
+export const EVENT_NAME = "Dashabdi Mahotsav";
 
 /** The event days, 29 Jan – 1 Feb 2027. Calendar days at the venue, no time zone. Mirrors `EVENT.days` on the frontend. */
 export const EVENT_DAYS = ["2027-01-29", "2027-01-30", "2027-01-31", "2027-02-01"] as const;

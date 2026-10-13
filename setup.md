@@ -115,7 +115,7 @@ admin gets the link on screen and sends it from their own phone with the
 2. **Connect WhatsApp** (MSG91 → WhatsApp → *Add number* / *Embedded signup*).
    This walks through Meta's screens: create or pick a Meta Business portfolio
    in the trust's name, set the **display name** people will see (e.g.
-   "Youth Convention 2026"), add the new number and verify it by OTP.
+   "Dashabdi Mahotsav"), add the new number and verify it by OTP.
 3. **Create the invite template** (MSG91 → WhatsApp → Templates → *Create*),
    exactly as below, and submit it for approval. Approval usually takes minutes
    to a few hours.
@@ -127,7 +127,7 @@ admin gets the link on screen and sends it from their own phone with the
    | Language | English (`en`) |
    | Header | None |
    | Body | `Hello, {{1}} has invited you to join {{2}} as {{3}}. Tap the button below to sign in and accept. The link works once and expires in 7 days.` |
-   | Body samples | `{{1}}` = `Harit Patel`, `{{2}}` = `Youth Convention 2026`, `{{3}}` = `Mandal sanchalak for Surat` |
+   | Body samples | `{{1}}` = `Harit Patel`, `{{2}}` = `Dashabdi Mahotsav`, `{{3}}` = `Mandal sanchalak for Surat` |
    | Button | *Visit website* → **Dynamic** URL: `https://<your-frontend-domain>/invite/{{1}}`, button text `Accept invite` |
    | Button sample | `{{1}}` = `abc123` |
 
@@ -171,7 +171,7 @@ admin gets the link on screen and sends it from their own phone with the
    | Language | English (`en`) |
    | Header | None |
    | Body | `Hello {{1}}, your stay for {{2}} is arranged. {{3}}. Please show this message at the guest house, and reply here if your plans change.` |
-   | Body samples | `{{1}}` = `Harit Patel`, `{{2}}` = `Youth Convention 2026`, `{{3}}` = `Gurukul – Memnagar, Memnagar. Room 12: Harit Patel, Priya Patel. Map: https://maps.app.goo.gl/abc. Contact: Rameshbhai, +91 98765 43210` |
+   | Body samples | `{{1}}` = `Harit Patel`, `{{2}}` = `Dashabdi Mahotsav`, `{{3}}` = `Gurukul – Memnagar, Memnagar. Room 12: Harit Patel, Priya Patel. Map: https://maps.app.goo.gl/abc. Contact: Rameshbhai, +91 98765 43210` |
 
    The server fills `{{3}}` with every place, room and person on one line —
    WhatsApp does not allow line breaks inside a placeholder. Until this

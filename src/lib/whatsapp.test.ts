@@ -21,7 +21,7 @@ const send = () =>
   sendWhatsAppTemplate({
     to: "+919876543210",
     template: "admin_invite",
-    body: ["Harit Patel", "Youth Convention 2026"],
+    body: ["Harit Patel", "Dashabdi Mahotsav"],
     buttonUrl: "tok_123",
     usage: { endpoint: "whatsapp:admin_invite", userId: "u1" },
   });
@@ -80,7 +80,7 @@ describe("sendWhatsAppTemplate", () => {
               to: ["919876543210"],
               components: {
                 body_1: { type: "text", value: "Harit Patel" },
-                body_2: { type: "text", value: "Youth Convention 2026" },
+                body_2: { type: "text", value: "Dashabdi Mahotsav" },
                 button_1: { subtype: "url", type: "text", value: "tok_123" },
               },
             },
