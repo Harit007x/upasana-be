@@ -228,6 +228,23 @@ const lookup = async (req: Request, res: Response): Promise<void> => {
   });
 };
 
+/**
+ * Public: whether a number is already some registration's contact, so the
+ * devotee form can say so as soon as the number is complete — before a code
+ * is sent that could only lead to "already registered". Yes or no and nothing
+ * else: no code, name or mandal reaches anyone who has not proved the number
+ * is theirs (POST /otp/verify returns those).
+ */
+const taken = async (req: Request, res: Response): Promise<void> => {
+  const mobile = String(req.query.mobile ?? "");
+  if (!MOBILE_E164.test(mobile)) {
+    res.status(400).json({ success: false, code: "VALIDATION_ERROR", message: "Give a mobile number with country code" });
+    return;
+  }
+  const count = await prisma.registration.count({ where: byPrimaryMobile(mobile) });
+  res.status(200).json({ success: true, data: { taken: count > 0 } });
+};
+
 const setStatus = async (req: Request, res: Response): Promise<void> => {
   const id = String(req.params.id);
   const parsed = statusSchema.safeParse(req.body);
@@ -384,4 +401,4 @@ const updateSelf = async (req: Request, res: Response): Promise<void> => {
   res.status(200).json({ success: true, data: toRegistrationDto(registration) });
 };
 
-export const registrationController = { create, list, getOne, lookup, setStatus, update, mine, updateSelf };
+export const registrationController = { create, list, getOne, lookup, taken, setStatus, update, mine, updateSelf };

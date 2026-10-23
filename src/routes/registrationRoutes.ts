@@ -5,7 +5,7 @@ import { optionalSession, protect, requireReviewer, requireStaff } from "../midd
 
 export const registrationRouter = express.Router();
 
-const { create, list, getOne, lookup, setStatus, update, mine, updateSelf } = registrationController;
+const { create, list, getOne, lookup, taken, setStatus, update, mine, updateSelf } = registrationController;
 
 /**
  * @openapi
@@ -70,6 +70,25 @@ registrationRouter.post("/mine", mine);
  *         description: NOT_EDITABLE — checked in or cancelled
  */
 registrationRouter.patch("/:id/self", updateSelf);
+
+/**
+ * @openapi
+ * /registrations/taken:
+ *   get:
+ *     summary: Whether a number is already a registration's contact
+ *     description: >
+ *       Public. `?mobile=+91…`. Lets the devotee form say "already registered"
+ *       as soon as the number is complete, before a code is sent. Answers yes
+ *       or no only — the registration's details come from POST /otp/verify,
+ *       once the number is proved.
+ *     tags: [Registrations]
+ *     responses:
+ *       200:
+ *         description: "`{ taken }`"
+ *       400:
+ *         description: VALIDATION_ERROR — not a mobile number with country code
+ */
+registrationRouter.get("/taken", taken);
 
 // Everything below holds devotees' personal details: the desk only, and a
 // sanchalak only for their mandal.
