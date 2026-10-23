@@ -45,6 +45,12 @@ app.use(
 
 app.use(cookieParser());
 
+// Meta signs each WhatsApp webhook over the exact bytes it sent, so this route
+// gets the raw body; parsed as JSON first, a re-serialised copy would never
+// match the signature. Mounted before the general parser, which then leaves
+// it alone.
+app.use("/api/webhooks/whatsapp", express.raw({ type: "*/*", limit: "1mb" }));
+
 // The Assistant sends its whole conversation, tool results included, with
 // every turn: far past the default 100 kB. Parsed here first, so the general
 // parser below leaves it alone.

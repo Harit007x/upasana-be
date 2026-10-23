@@ -5,6 +5,7 @@ import { adminInvitesController } from "../controllers/adminInvitesController";
 import { adminSampleDataController } from "../controllers/adminSampleDataController";
 import { registrationChangesController } from "../controllers/registrationChangesController";
 import { assistantController } from "../controllers/assistantController";
+import { adminWhatsAppController } from "../controllers/adminWhatsAppController";
 import { protect, requireAdmin } from "../middlewares/authMiddleware";
 
 export const adminRouter = express.Router();
@@ -241,6 +242,57 @@ adminRouter.delete("/sample-data", removeSampleData);
  *         description: "`{ changes, total, page, pageSize }`"
  */
 adminRouter.get("/registration-changes", registrationChangesController.list);
+
+/**
+ * @openapi
+ * /admin/whatsapp/messages:
+ *   get:
+ *     summary: WhatsApp messages we sent, and what became of each
+ *     description: >
+ *       Newest first, 50 a page. Only sends Meta accepted are here; `status`
+ *       moves accepted → sent → delivered → read, or to failed with Meta's
+ *       `errorCode` / `errorMessage`, as the webhook reports.
+ *     tags: [Admin]
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [accepted, sent, delivered, read, failed] }
+ *       - in: query
+ *         name: q
+ *         schema: { type: string }
+ *         description: Part of the number; non-digits are ignored
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *     responses:
+ *       200:
+ *         description: "`{ messages, total, page, pageSize }`"
+ */
+adminRouter.get("/whatsapp/messages", adminWhatsAppController.listMessages);
+
+/**
+ * @openapi
+ * /admin/whatsapp/replies:
+ *   get:
+ *     summary: Messages devotees sent to our WhatsApp number
+ *     description: >
+ *       Newest first, 50 a page, with the registration whose contact the
+ *       number is when one matches. The number is not on any phone, so this is
+ *       the only place replies can be read.
+ *     tags: [Admin]
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         schema: { type: string }
+ *         description: Part of the number; non-digits are ignored
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *     responses:
+ *       200:
+ *         description: "`{ replies, total, page, pageSize }`"
+ */
+adminRouter.get("/whatsapp/replies", adminWhatsAppController.listReplies);
 
 /**
  * @openapi

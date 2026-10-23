@@ -9,8 +9,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./usage", () => ({ recordUsage: vi.fn() }));
+vi.mock("./whatsapp-log", () => ({ logSentMessage: vi.fn() }));
 
 import { recordUsage } from "./usage";
+import { logSentMessage } from "./whatsapp-log";
 import {
   WhatsAppSendError,
   WhatsAppUnavailableError,
@@ -156,6 +158,13 @@ describe("sendWhatsAppTemplate", () => {
     expect(recordUsage).toHaveBeenCalledWith(
       expect.objectContaining({ endpoint: "whatsapp:admin_invite", userId: "u1" })
     );
+    expect(logSentMessage).toHaveBeenCalledWith({
+      waMessageId: "wamid.XYZ",
+      to: "919876543210",
+      template: "team_invite",
+      language: "en",
+      purpose: "whatsapp:admin_invite",
+    });
   });
 
   it("sends an OTP with the code in the body and on the copy-code button", async () => {
@@ -196,6 +205,7 @@ describe("sendWhatsAppTemplate", () => {
     expect(error.code).toBe(1);
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(recordUsage).not.toHaveBeenCalled();
+    expect(logSentMessage).not.toHaveBeenCalled();
   });
 
   it("does not retry a refusal that will not change", async () => {
@@ -216,6 +226,8 @@ describe("sendWhatsAppTemplate", () => {
     await send({ lang: "gu" });
     expect(bodyOf(0).template.language.code).toBe("gu");
     expect(bodyOf(1).template.language.code).toBe("en");
+    // The log says which language actually went out.
+    expect(logSentMessage).toHaveBeenCalledWith(expect.objectContaining({ language: "en" }));
   });
 
   it("does not fall back when the default language itself is missing", async () => {

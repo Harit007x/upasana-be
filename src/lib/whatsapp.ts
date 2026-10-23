@@ -1,4 +1,5 @@
 import { recordUsage } from "./usage";
+import { logSentMessage } from "./whatsapp-log";
 
 /**
  * WhatsApp messages, sent through Meta's WhatsApp Cloud API directly (no BSP).
@@ -219,10 +220,11 @@ export async function sendWhatsAppTemplate(options: {
 
   const fallbackLang = defaultWhatsAppLang();
   const lang = options.lang ?? fallbackLang;
+  const to = toWhatsAppNumber(options.to);
   const payloadFor = (languageCode: string) => ({
     messaging_product: "whatsapp",
     recipient_type: "individual",
-    to: toWhatsAppNumber(options.to),
+    to,
     type: "template",
     template: {
       name: options.template,
@@ -257,6 +259,15 @@ export async function sendWhatsAppTemplate(options: {
     }
   }
 
-  await recordUsage({ ...options.usage, costUsd: UTILITY_COST_USD });
+  await Promise.all([
+    recordUsage({ ...options.usage, costUsd: UTILITY_COST_USD }),
+    logSentMessage({
+      waMessageId,
+      to,
+      template: options.template,
+      language: languageCode,
+      purpose: options.usage.endpoint,
+    }),
+  ]);
   return { waMessageId };
 }

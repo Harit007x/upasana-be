@@ -802,3 +802,77 @@ model AssistantAsk {
 
   @@map("assistant_ask")
 }
+
+/// One WhatsApp template Meta accepted from us, and what became of it. Written
+/// by `sendWhatsAppTemplate` (src/lib/whatsapp.ts) the moment Meta answers with
+/// a message id; moved along by the delivery webhook
+/// (src/lib/whatsapp-webhook.ts) as Meta reports sent → delivered → read, or
+/// failed. Admins read them on the WhatsApp screen (/admin/whatsapp).
+///
+/// Only accepted sends are here: a send Meta refused on the spot has no
+/// message id to key it by, and its reason is in the server log and in the
+/// response to whoever asked. The template's values are not stored — for a
+/// code they are the code itself.
+model WhatsAppMessage {
+  id          String @id @default(auto()) @map("_id") @db.ObjectId
+  /// Meta's id, "wamid.…". Every row has one, so a plain unique index is safe.
+  waMessageId String @unique
+  /// Country code and number, digits only, as sent.
+  to          String
+  template    String
+  /// The language code the template went out in, after any fallback.
+  language    String
+  /// What it was for, the usage-ledger label: "whatsapp:otp", "whatsapp:admin_invite"…
+  purpose     String
+  /// The registration whose contact this number is, when one matched at send time.
+  registrationId String? @db.ObjectId
+
+  /// "accepted" | "sent" | "delivered" | "read" | "failed". Only ever moves
+  /// forward (`statusRank`): Meta delivers webhooks out of order and twice.
+  status       String  @default("accepted")
+  errorCode    Int?
+  errorMessage String?
+
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  readAt      DateTime?
+  failedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([to])
+  @@index([createdAt])
+  @@map("whatsapp_message")
+}
+
+/// One message a devotee sent to our WhatsApp number. The number lives on
+/// Meta's servers, not on anyone's phone, so this is the only place a reply is
+/// ever seen. Written by the delivery webhook; admins read them on the
+/// WhatsApp screen.
+model WhatsAppInbound {
+  id          String @id @default(auto()) @map("_id") @db.ObjectId
+  /// Meta's id. Unique, which is what makes a redelivered webhook a no-op.
+  waMessageId String @unique
+  /// Country code and number, digits only.
+  from        String
+  /// The sender's WhatsApp profile name, as they set it.
+  profileName String?
+  /// "text", "button", "interactive", "image", "audio", "location"…
+  type        String
+  /// What can be shown as words: the text, a button's label, a caption.
+  text        String?
+  /// The message exactly as Meta sent it.
+  raw         Json
+  /// The registration whose contact is this number, when one matched.
+  registrationId String? @db.ObjectId
+
+  /// When the devotee sent it (Meta's timestamp), not when it reached us.
+  receivedAt DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([receivedAt])
+  @@index([from])
+  @@map("whatsapp_inbound")
+}

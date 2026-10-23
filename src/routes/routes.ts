@@ -9,6 +9,7 @@ import { otpRouter } from "./otpRoutes";
 import { scheduleRouter } from "./scheduleRoutes";
 import { accommodationRouter } from "./accommodationRoutes";
 import { guestRouter } from "./guestRoutes";
+import { webhookRouter } from "./webhookRoutes";
 
 export const router = express.Router();
 
@@ -36,3 +37,4 @@ router.use("/otp", otpRouter);
 router.use("/schedule", scheduleRouter);
 router.use("/accommodation", accommodationRouter);
 router.use("/guests", guestRouter);
+router.use("/webhooks", webhookRouter);
