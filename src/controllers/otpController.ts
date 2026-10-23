@@ -41,9 +41,9 @@ const send = async (req: Request, res: Response): Promise<void> => {
   if (!parsed.success) {
     return fail(res, 400, "VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Invalid number");
   }
-  const { mobile } = parsed.data;
+  const { mobile, lang } = parsed.data;
 
-  // Without MSG91 the code cannot reach anyone. In development it is logged
+  // Without WhatsApp the code cannot reach anyone. In development it is logged
   // and returned instead, so the form can be tried before WhatsApp is set up;
   // in production that would hand the code to whoever asked, so it refuses.
   const deliverable = isWhatsAppConfigured();
@@ -89,6 +89,7 @@ const send = async (req: Request, res: Response): Promise<void> => {
       await sendWhatsAppTemplate({
         to: mobile,
         template: WHATSAPP_TEMPLATES.otp(),
+        lang,
         // Authentication templates carry the code twice: in the body and as
         // the value of the "Copy code" button.
         body: [code],

@@ -3,26 +3,28 @@ import { z } from "zod";
 
 import { prisma } from "../utils/db";
 import { MOBILE_E164 } from "./event";
+import { WHATSAPP_LANGS } from "./whatsapp";
 
 /**
  * Mobile number verification: one-time codes, and the token that proves a
  * number was verified.
  *
- * Codes are sent on WhatsApp through MSG91 (src/lib/whatsapp.ts), using an
- * Authentication template. The rate limits below are counted from the
- * `PhoneVerification` rows themselves, so they need no extra store, and they
- * matter: the endpoint is public, and every code sent is paid for.
+ * Codes are sent on WhatsApp through Meta's Cloud API (src/lib/whatsapp.ts),
+ * using an Authentication template, in the language the form is shown in. The
+ * rate limits below are counted from the `PhoneVerification` rows themselves,
+ * so they need no extra store, and they matter: the endpoint is public, and
+ * every code sent is paid for.
  */
 
 /**
- * TEMPORARY: off until the WhatsApp Business API is set up to send codes. While
- * off, a new registration needs no code for its contact number and is saved
- * with `mobileVerification` null. Devotees editing their own registration
- * (/register/edit) still need a code — that is what keeps one devotee out of
- * another's details. Turn back on together with MOBILE_OTP_REQUIRED in
- * upasana-fe/src/features/registrations/form/schema.ts.
+ * Whether a new registration's contact number needs a WhatsApp code. Off from
+ * 2026-10-13 to 2026-10-23 while WhatsApp was not set up; registrations saved
+ * then have `mobileVerification` null. Off, devotees editing their own
+ * registration (/register/edit) still need a code — that is what keeps one
+ * devotee out of another's details. Change together with MOBILE_OTP_REQUIRED
+ * in upasana-fe/src/features/registrations/form/schema.ts.
  */
-export const MOBILE_OTP_REQUIRED = false;
+export const MOBILE_OTP_REQUIRED = true;
 
 /** How long a code works. */
 export const OTP_TTL_MINUTES = 10;
@@ -34,7 +36,7 @@ export const OTP_RESEND_SECONDS = 30;
 export const OTP_MAX_PER_NUMBER_PER_HOUR = 5;
 /**
  * Codes per hour across everyone: a ceiling on what a script cycling through
- * numbers can spend from the MSG91 wallet. Well above any real registration
+ * numbers can spend on Meta's invoice. Well above any real registration
  * rush. Not per IP on purpose — behind a reverse proxy without `trust proxy`,
  * every visitor shares the proxy's address, and a per-IP limit would quietly
  * become this one at a far lower number.
@@ -45,6 +47,8 @@ export const OTP_TOKEN_TTL_HOURS = 2;
 
 export const sendOtpSchema = z.object({
   mobile: z.string().trim().regex(MOBILE_E164, "Enter a valid mobile number with country code"),
+  /** The language the form is shown in, so the code arrives in it too. */
+  lang: z.enum(WHATSAPP_LANGS).optional(),
 });
 
 export const verifyOtpSchema = z.object({

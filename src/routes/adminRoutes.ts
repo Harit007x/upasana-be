@@ -127,7 +127,7 @@ adminRouter.get("/team", listTeam);
  *     description: >
  *       Creates a single-use link that expires in 7 days and revokes any earlier
  *       pending link for the same address, then sends it — by email (Resend)
- *       or on WhatsApp (MSG91). The `url` is always returned so the admin can
+ *       or on WhatsApp (Meta Cloud API). The `url` is always returned so the admin can
  *       share it themselves; `sent` says whether the server delivered it and
  *       `notSentReason` (not_configured | failed) why not.
  *     tags: [Admin Team]

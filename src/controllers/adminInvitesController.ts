@@ -60,7 +60,7 @@ const listTeam = async (_req: Request, res: Response): Promise<void> => {
 
 /**
  * Creates an invite and sends it: by email through Resend, or on WhatsApp
- * through MSG91.
+ * through Meta's Cloud API.
  *
  * The link is returned to the admin either way. A send that fails — the
  * provider is down, not configured yet, or refuses the number — should not
@@ -147,7 +147,7 @@ const createInvite = async (req: Request, res: Response): Promise<void> => {
     } else {
       try {
         // The template's button URL is fixed as <site>/invite/{{1}} when it is
-        // created in MSG91, so only the token travels here.
+        // created in WhatsApp Manager, so only the token travels here.
         await sendWhatsAppTemplate({
           to: input.mobile,
           template: WHATSAPP_TEMPLATES.teamInvite(),

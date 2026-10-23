@@ -18,7 +18,8 @@
     "seed:registrations": "ts-node scripts/seed-registrations.ts",
     "seed:schedule": "ts-node scripts/seed-schedule.ts",
     "seed:accommodation": "ts-node scripts/seed-accommodation.ts",
-    "grant-role": "ts-node scripts/grant-role.ts"
+    "grant-role": "ts-node scripts/grant-role.ts",
+    "wa:test": "ts-node scripts/send-test-whatsapp.ts"
   },
   "keywords": [
     "express",

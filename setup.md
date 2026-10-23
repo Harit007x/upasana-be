@@ -90,119 +90,89 @@ a Google error page.
 > someone else's address and inherit it the moment that person used Google. The
 > two can only be merged safely once the local account's email is verified.
 
-### WhatsApp (MSG91, optional)
+### WhatsApp (Meta Cloud API)
 
-Team invites (admins and mandal sanchalaks) to a mobile number are sent on WhatsApp through
-[MSG91](https://msg91.com). Until this is set up, mobile invites still work: the
-admin gets the link on screen and sends it from their own phone with the
-**Send on WhatsApp** / **Send SMS** buttons. All the MSG91 code is in
-`src/lib/whatsapp.ts`.
+Verification codes on the registration form and on *Edit my registration*, and team invites to a
+mobile number, are sent on WhatsApp straight through **Meta's Cloud API** — no BSP. All of it is in
+`src/lib/whatsapp.ts`. The Meta-side status (what is approved, what is pending) is in
+`../whatsapp-business.md`.
 
-**What you need first**
+Until it is configured: codes are printed in the server log and shown on the form in a yellow
+"Dev mode" note **in development**; **in production** the form cannot send codes (503
+`OTP_UNAVAILABLE`). Mobile invites still work — the admin gets the link and shares it.
 
-- A **new phone number** that is *not* registered on the WhatsApp or WhatsApp
-  Business app. It becomes the number messages come from. It must be able to
-  receive an OTP (SMS or call) once, during setup.
-- A **Facebook account** to create the Meta business account with — MSG91's
-  signup opens Meta's own screens for this part.
-- The trust's / Mandir's **registration documents**, for business verification
-  (step 5).
+**1. Settings** — `.env.example` explains each one.
 
-**Steps**
+```env
+WA_GRAPH_VERSION=v25.0
+WA_PHONE_NUMBER_ID=1391824954010292   # test number while trying things; 1367927919739540 is production
+WA_WABA_ID=2234487277335089           # test WABA; 1392903549573434 is production
+WA_ACCESS_TOKEN=...                   # App → WhatsApp → API Setup (temporary: ~24 h)
+WA_DEFAULT_LANG=en
+WA_TEMPLATE_OTP=anoopam_otp
+WA_TEMPLATE_INVITE=team_invite
+```
 
-1. **Sign up at msg91.com** and pick the WhatsApp product. Top up the wallet
-   (prepaid, in ₹) — messages are deducted from it.
-2. **Connect WhatsApp** (MSG91 → WhatsApp → *Add number* / *Embedded signup*).
-   This walks through Meta's screens: create or pick a Meta Business portfolio
-   in the trust's name, set the **display name** people will see (e.g.
-   "Dashabdi Mahotsav"), add the new number and verify it by OTP.
-3. **Create the invite template** (MSG91 → WhatsApp → Templates → *Create*),
-   exactly as below, and submit it for approval. Approval usually takes minutes
-   to a few hours.
+Restart the server after changing them. The temporary token expires in about a day; the log then
+says `WA_ACCESS_TOKEN is expired or invalid`. A permanent token comes from a System User in Business
+settings, once 2FA is on for the admin's Facebook account.
 
-   | Field | Value |
-   | --- | --- |
-   | Name | `team_invite` |
-   | Category | **Utility** (not Marketing — Utility is ₹0.115/message, Marketing ~₹0.86) |
-   | Language | English (`en`) |
-   | Header | None |
-   | Body | `Hello, {{1}} has invited you to join {{2}} as {{3}}. Tap the button below to sign in and accept. The link works once and expires in 7 days.` |
-   | Body samples | `{{1}}` = `Harit Patel`, `{{2}}` = `Dashabdi Mahotsav`, `{{3}}` = `Mandal sanchalak for Surat` |
-   | Button | *Visit website* → **Dynamic** URL: `https://<your-frontend-domain>/invite/{{1}}`, button text `Accept invite` |
-   | Button sample | `{{1}}` = `abc123` |
+**2. Templates** (WhatsApp Manager → Message templates → *Create template*). Templates belong to one
+WhatsApp Business Account: to test on the test number, create them in the test WABA too.
 
-   The server fills `{{1}}` with the inviting admin's name, `{{2}}` with the
-   event name, `{{3}}` with the role ("an admin" or "Mandal sanchalak for
-   <mandal>"), and the button's `{{1}}` with the invite token. Meta rejects a
-   body that *starts or ends* with a placeholder, which is why it opens with
-   "Hello,".
+*Verification code* — the one the form needs:
 
-   The button URL must be your **real, public frontend domain** — Meta does not
-   accept `localhost`. It is fixed into the template, so if the domain changes
-   the template has to be edited and re-approved. Until the app is deployed,
-   invites sent this way will open the production domain, not your laptop.
-   **Then the verification-code template**, used to verify the primary
-   contact's mobile on the registration form:
+| Field | Value |
+| --- | --- |
+| Name | `anoopam_otp` (`upasana_otp` was deleted on 2026-10-23, and Meta blocks a deleted name for ~30 days) |
+| Category | **Authentication** |
+| Languages | English (`en`), then *Add language* → Gujarati (`gu`) |
+| Code delivery | **Copy code** button |
+| Options | Tick *Add security recommendation*; *Expiration* **10 minutes** |
 
-   | Field | Value |
-   | --- | --- |
-   | Name | `registration_otp` |
-   | Category | **Authentication** |
-   | Language | English (`en`) |
-   | Code delivery | **Copy code** button |
-   | Options | Tick *Add security recommendation*; set *Expiration* to **10 minutes** |
+Meta writes the wording of authentication templates itself ("123456 is your verification code…"),
+so there is no body to type. The server puts the code in the body and on the button, in the language
+the form is shown in. If the Gujarati copy is missing or not approved yet, the code is sent in
+English automatically — create the English one first.
 
-   Meta writes the wording of authentication templates itself ("123456 is your
-   verification code. For your security, do not share this code."), so there is
-   no body to type. The server fills the code into the body and the button.
+If you create them as "English (US)", set `WA_LANG_CODE_EN=en_US`. A mismatch fails with Meta error
+132001.
 
-   Until this template is live, the form still works **in development**: the
-   code is printed in the server log and shown on the form in a yellow
-   "Dev mode" note. **In production** (`NODE_ENV=production`) the form cannot
-   send codes until WhatsApp is configured, and registrations cannot be
-   submitted.
-   **Then the room-details template**, used by *Send room details* on the
-   Accommodation screen to tell a registration's contact where everyone stays:
+*Team invite* (Utility, English):
 
-   | Field | Value |
-   | --- | --- |
-   | Name | `room_details` |
-   | Category | **Utility** |
-   | Language | English (`en`) |
-   | Header | None |
-   | Body | `Hello {{1}}, your stay for {{2}} is arranged. {{3}}. Please show this message at the guest house, and reply here if your plans change.` |
-   | Body samples | `{{1}}` = `Harit Patel`, `{{2}}` = `Dashabdi Mahotsav`, `{{3}}` = `Gurukul – Memnagar, Memnagar. Room 12: Harit Patel, Priya Patel. Map: https://maps.app.goo.gl/abc. Contact: Rameshbhai, +91 98765 43210` |
+| Field | Value |
+| --- | --- |
+| Name | `team_invite` |
+| Category | **Utility** (not Marketing — Utility ~₹0.115, Marketing ~₹0.86) |
+| Body | `Hello, {{1}} has invited you to join {{2}} as {{3}}. Tap the button below to sign in and accept. The link works once and expires in 7 days.` |
+| Body samples | `Harit Patel`, `Dashabdi Mahotsav`, `Mandal sanchalak for Surat` |
+| Button | *Visit website* → **Dynamic** URL `https://<your-frontend-domain>/invite/{{1}}`, text `Accept invite`, sample `abc123` |
 
-   The server fills `{{3}}` with every place, room and person on one line —
-   WhatsApp does not allow line breaks inside a placeholder. Until this
-   template is live, *Send room details* shows the message for a team member
-   to send from their own WhatsApp (*Open WhatsApp* fills it in), then *Mark
-   as sent*; *Send all* needs the template.
-4. **Copy the settings into `.env`** and restart the server:
+The button URL must be the real public domain (Meta refuses `localhost`), and a domain change means
+re-approval. Meta also refuses a body that starts or ends with a placeholder.
 
-   ```env
-   MSG91_AUTH_KEY=...                # MSG91 → Authkey
-   MSG91_WHATSAPP_NUMBER=919XXXXXXXXX  # the connected number, country code, no +
-   MSG91_WHATSAPP_NAMESPACE=          # only if MSG91 shows one on the template
-   MSG91_WHATSAPP_LANGUAGE=en
-   MSG91_TEMPLATE_INVITE=team_invite
-   MSG91_TEMPLATE_OTP=registration_otp
-   MSG91_TEMPLATE_STAY=room_details
-   ```
+*Room details* (`room_details`) belongs to the paused per-person allotment; what the stay message
+says is still to be decided, so do not create it yet.
 
-   The Admins screen picks this up on its next load: the *Mobile* option then
-   says "We send them the link on WhatsApp", and a sent invite shows
-   *Sent on WhatsApp*.
-5. **Start business verification early** (Meta Business Settings → Security
-   Centre, or ask MSG91 support to help). Until the business is verified, Meta
-   caps how many different people you can message per day (historically 250).
-   Fine for team invites; not enough for thousands of registration
-   confirmations in the week before the event.
+**3. Try it** without the form:
 
-**If a send fails**, the invite is still created and the admin sees the link
-with a "could not be sent on WhatsApp" note. The server log has MSG91's reason
-(`[WhatsApp] Admin invite to … failed:`) — usually an unapproved template name,
-a template whose placeholders do not match, or an empty wallet.
+```bash
+pnpm wa:test +91XXXXXXXXXX            # Meta's hello_world — proves token, number id and recipient
+pnpm wa:test +91XXXXXXXXXX otp gu     # the OTP template, with a made-up code
+```
+
+The test number only delivers to the recipients added in App → WhatsApp → API Setup. Every send from
+the production number is a paid message.
+
+**4. Switch registration OTP back on** — once a code arrives from the production number: set
+`MOBILE_OTP_REQUIRED = true` in **both** `src/lib/otp.ts` and
+`upasana-fe/src/features/registrations/form/schema.ts`. *Edit my registration* always uses a code
+and needs no switch.
+
+**If a send fails**, the log line starts `[OTP] WhatsApp code to … failed:` or
+`[WhatsApp] Admin invite to … failed:` and carries Meta's error code: 190 expired token, 132001 no
+template in that language, 132000 wrong number of values, 131030 recipient not on the test number's
+list, 130429 rate limit (retried automatically).
 
 ## 3. Database Setup (Prisma)
 

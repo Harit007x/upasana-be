@@ -1,45 +1,81 @@
 import { recordUsage } from "./usage";
 
 /**
- * WhatsApp messages, sent through MSG91.
+ * WhatsApp messages, sent through Meta's WhatsApp Cloud API directly (no BSP).
  *
- * The only file that knows about MSG91. Moving to Meta's Cloud API directly, or
- * another provider, means rewriting `sendWhatsAppTemplate` and nothing else.
+ * The only file that talks to graph.facebook.com. MSG91 was the first plan
+ * and was never configured; it was removed on 2026-10-19 when the trust's own
+ * WhatsApp Business Account went live on Meta.
  *
  * WhatsApp only lets a business start a conversation with a **template** Meta
- * has approved, so every message here is a template name plus the values for
- * its `{{1}}`, `{{2}}`… placeholders. The templates themselves are created in
- * the MSG91 dashboard; setup.md lists the exact wording each one needs.
+ * has approved, so every message here is a template name, a language, and the
+ * values for its `{{1}}`, `{{2}}`… placeholders. Templates are created in
+ * WhatsApp Manager → Message templates; setup.md lists the exact wording.
+ * Templates belong to a WhatsApp Business Account: the test number's WABA and
+ * the production one each need their own copy.
  *
  * Read from the environment at call time, never at import: env is loaded in
  * src/env.ts, and a module-scope read here would freeze whatever came first —
  * the same reason src/lib/email.ts builds its client lazily.
  */
 
-const ENDPOINT = "https://api.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/";
 const TIMEOUT_MS = 10_000;
 
 /**
- * Meta's India rate for a utility or authentication template, ₹0.115, in USD
- * for the usage ledger. Approximate on purpose: the ledger is for spotting spend, and the
- * exact figure is on MSG91's invoice.
+ * Meta's India rate for a utility or authentication template, ₹0.115 before
+ * GST, in USD for the usage ledger. Approximate on purpose: the ledger is for
+ * spotting spend, and the exact figure is on Meta's invoice.
  */
 const UTILITY_COST_USD = 0.0014;
 
-/** Approved template names, each overridable from .env in case MSG91 wants a different one. */
+/**
+ * Waits between attempts when Meta says "not now". Short, because the OTP
+ * send runs inside the devotee's request and they are watching a spinner.
+ */
+const RETRY_DELAYS_MS = [500, 1500];
+
+/**
+ * Meta error codes worth another try: throttling (4, 80007, 130429) and its
+ * own transient failures (1, 2, 131000, 133004). Deliberately not 131056 (too
+ * many messages to one number) — that pair limit lasts longer than a request.
+ */
+const RETRYABLE_CODES = new Set([1, 2, 4, 80007, 130429, 131000, 133004]);
+/** "Template name does not exist in the translation": no copy in that language. */
+const MISSING_TRANSLATION = 132001;
+/** The access token expired or was revoked — the temporary one lasts ~24 hours. */
+const TOKEN_INVALID = 190;
+
+/** The languages the public pages are shown in, and so the ones templates are approved in. */
+export const WHATSAPP_LANGS = ["en", "gu"] as const;
+export type WhatsAppLang = (typeof WHATSAPP_LANGS)[number];
+
+/** Approved template names, each overridable from .env in case Meta made us pick another. */
 export const WHATSAPP_TEMPLATES = {
   /** {{1}} inviter, {{2}} event, {{3}} role ("an admin", "Mandal sanchalak for Surat"); button: the token. */
-  teamInvite: () => process.env.MSG91_TEMPLATE_INVITE || "team_invite",
+  teamInvite: () => process.env.WA_TEMPLATE_INVITE || "team_invite",
   /** An Authentication-category template: the code in the body and on its copy-code button. */
-  otp: () => process.env.MSG91_TEMPLATE_OTP || "registration_otp",
-  /** {{1}} contact's name, {{2}} event, {{3}} where everyone stays, on one line. */
-  stayDetails: () => process.env.MSG91_TEMPLATE_STAY || "room_details",
+  otp: () => process.env.WA_TEMPLATE_OTP || "anoopam_otp",
+  /** {{1}} contact's name, {{2}} event, {{3}} where everyone stays, on one line. Paused feature. */
+  stayDetails: () => process.env.WA_TEMPLATE_ROOM_DETAILS || "room_details",
 };
 
 export class WhatsAppUnavailableError extends Error {
   constructor() {
-    super("WhatsApp is not configured: set MSG91_AUTH_KEY and MSG91_WHATSAPP_NUMBER");
+    super("WhatsApp is not configured: set WA_ACCESS_TOKEN and WA_PHONE_NUMBER_ID");
     this.name = "WhatsAppUnavailableError";
+  }
+}
+
+/** Meta refused the message, or could not be reached. Carries Meta's own code when it gave one. */
+export class WhatsAppSendError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: number,
+    readonly retryable = false
+  ) {
+    super(message);
+    this.name = "WhatsAppSendError";
   }
 }
 
@@ -48,73 +84,179 @@ const isSet = (value: string | undefined): value is string =>
 
 /** Whether the server can send WhatsApp messages at all. */
 export function isWhatsAppConfigured(): boolean {
-  return isSet(process.env.MSG91_AUTH_KEY) && isSet(process.env.MSG91_WHATSAPP_NUMBER);
+  return isSet(process.env.WA_ACCESS_TOKEN) && isSet(process.env.WA_PHONE_NUMBER_ID);
 }
 
-/** MSG91 wants numbers as bare digits with the country code: "+919876543210" → "919876543210". */
-const digits = (phone: string) => phone.replace(/\D/g, "");
+/** The language a message goes out in when the caller does not know the reader's. */
+export function defaultWhatsAppLang(): WhatsAppLang {
+  const lang = process.env.WA_DEFAULT_LANG as WhatsAppLang;
+  return WHATSAPP_LANGS.includes(lang) ? lang : "en";
+}
 
 /**
- * Sends one approved template to one number.
+ * The language code a template was approved under. Meta tells "English" (`en`)
+ * and "English (US)" (`en_US`) apart, and a send under the wrong one fails with
+ * 132001 — so the code is configurable rather than assumed.
+ */
+export function templateLanguageCode(lang: WhatsAppLang): string {
+  return (lang === "gu" ? process.env.WA_LANG_CODE_GU : process.env.WA_LANG_CODE_EN) || lang;
+}
+
+/**
+ * What the Cloud API wants in `to`: country code and number, digits only, no
+ * `+`. A bare 10-digit number is Indian (`91` added); a trunk `0` before one
+ * and an international `00` prefix are dropped. Stored numbers are already
+ * E.164, so in practice this only strips the `+`.
+ */
+export function toWhatsAppNumber(phone: string): string {
+  let digits = phone.replace(/\D/g, "");
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+  if (digits.length === 10) digits = `91${digits}`;
+  if (digits.length < 11 || digits.length > 15) {
+    throw new WhatsAppSendError(`Not a phone number WhatsApp can send to: "${phone}"`, 400);
+  }
+  return digits;
+}
+
+/** The Cloud API's `components` for a template: body values in order, then one URL-button value. */
+export function templateComponents(body: string[] = [], buttonUrl?: string) {
+  const components: object[] = [];
+  if (body.length > 0) {
+    components.push({ type: "body", parameters: body.map(text => ({ type: "text", text })) });
+  }
+  // Both a "Visit website" button's dynamic suffix and an Authentication
+  // template's copy-code button are sent this way: Meta models copy-code as a
+  // URL button whose value is the code.
+  if (buttonUrl !== undefined) {
+    components.push({
+      type: "button",
+      sub_type: "url",
+      index: "0",
+      parameters: [{ type: "text", text: buttonUrl }],
+    });
+  }
+  return components;
+}
+
+type GraphError = { message?: string; code?: number; error_data?: { details?: string } };
+
+/** Turns one failed response into an error that says what Meta said, and whether to try again. */
+function toSendError(status: number, error: GraphError | undefined): WhatsAppSendError {
+  const code = error?.code;
+  const detail = error?.error_data?.details ?? error?.message ?? `HTTP ${status}`;
+  const message =
+    code === TOKEN_INVALID
+      ? `WA_ACCESS_TOKEN is expired or invalid — generate a new one (${detail})`
+      : `Meta refused the WhatsApp message${code ? ` (${code})` : ""}: ${detail}`;
+  const retryable = status >= 500 || (code !== undefined && RETRYABLE_CODES.has(code));
+  return new WhatsAppSendError(message, status, code, retryable);
+}
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/** One POST to the messages endpoint. Resolves to the message id Meta assigned. */
+async function postOnce(payload: object): Promise<string> {
+  const version = process.env.WA_GRAPH_VERSION || "v25.0";
+  const url = `https://graph.facebook.com/${version}/${process.env.WA_PHONE_NUMBER_ID}/messages`;
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.WA_ACCESS_TOKEN}`,
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (error) {
+    // A timeout or a dropped connection. Retrying can deliver twice if Meta
+    // did accept it; for a code or an invite a duplicate beats nothing.
+    throw new WhatsAppSendError(`Could not reach Meta: ${(error as Error).message}`, 0, undefined, true);
+  }
+
+  // A non-JSON body (a gateway error page) is a failure too.
+  const result = (await response.json().catch(() => null)) as {
+    messages?: { id?: string }[];
+    error?: GraphError;
+  } | null;
+  const id = result?.messages?.[0]?.id;
+  if (!response.ok || !id) throw toSendError(response.status, result?.error);
+  return id;
+}
+
+/**
+ * Sends one approved template to one number, and returns Meta's message id
+ * (`wamid.…`) — the key the delivery webhook reports statuses under.
  *
- * Throws `WhatsAppUnavailableError` when MSG91 is not configured, and an Error
- * carrying MSG91's own message when the send is refused — callers decide what
- * a failed message means for the request in front of them.
+ * Throttling and Meta's transient failures are retried with backoff. A
+ * template with no copy in the reader's language is sent once more in the
+ * default one, so a Gujarati translation still waiting for approval does not
+ * stop the code from arriving.
+ *
+ * Throws `WhatsAppUnavailableError` when the Cloud API is not configured, and
+ * `WhatsAppSendError` carrying Meta's code and message when the send is
+ * refused — callers decide what a failed message means for their request.
  */
 export async function sendWhatsAppTemplate(options: {
-  /** E.164, e.g. "+919876543210". */
+  /** Any common form; see `toWhatsAppNumber`. Stored numbers are E.164, e.g. "+919876543210". */
   to: string;
   template: string;
+  /** The reader's language. Defaults to WA_DEFAULT_LANG. */
+  lang?: WhatsAppLang;
+  /** A raw template language code, for templates outside the app's own (e.g. `hello_world`, `en_US`). */
+  languageCode?: string;
   /** Values for the body's {{1}}, {{2}}…, in order. */
   body?: string[];
-  /** Value for a "Visit website" button's dynamic URL suffix. */
+  /** Value for a "Visit website" button's dynamic URL suffix, or an Authentication template's code. */
   buttonUrl?: string;
   /** Usage-ledger attribution. */
   usage: { endpoint: string; userId?: string };
-}): Promise<void> {
+}): Promise<{ waMessageId: string }> {
   if (!isWhatsAppConfigured()) throw new WhatsAppUnavailableError();
 
-  const components: Record<string, { type: string; value: string; subtype?: string }> = {};
-  (options.body ?? []).forEach((value, index) => {
-    components[`body_${index + 1}`] = { type: "text", value };
-  });
-  if (options.buttonUrl !== undefined) {
-    components.button_1 = { subtype: "url", type: "text", value: options.buttonUrl };
-  }
-
-  const namespace = process.env.MSG91_WHATSAPP_NAMESPACE;
-  const response = await fetch(ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      authkey: process.env.MSG91_AUTH_KEY as string,
+  const fallbackLang = defaultWhatsAppLang();
+  const lang = options.lang ?? fallbackLang;
+  const payloadFor = (languageCode: string) => ({
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: toWhatsAppNumber(options.to),
+    type: "template",
+    template: {
+      name: options.template,
+      language: { code: languageCode },
+      components: templateComponents(options.body, options.buttonUrl),
     },
-    body: JSON.stringify({
-      integrated_number: digits(process.env.MSG91_WHATSAPP_NUMBER as string),
-      content_type: "template",
-      payload: {
-        messaging_product: "whatsapp",
-        type: "template",
-        template: {
-          name: options.template,
-          language: { code: process.env.MSG91_WHATSAPP_LANGUAGE || "en", policy: "deterministic" },
-          ...(isSet(namespace) ? { namespace } : {}),
-          to_and_components: [{ to: [digits(options.to)], components }],
-        },
-      },
-    }),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
   });
 
-  // MSG91 can answer 200 with `hasError: true`, so the status code alone is
-  // not enough. A non-JSON body (a gateway error page) is a failure too.
-  const result = (await response.json().catch(() => null)) as
-    | { hasError?: boolean; status?: string; errors?: unknown; message?: string }
-    | null;
-  if (!response.ok || !result || result.hasError || result.status === "fail") {
-    const detail = result?.errors ?? result?.message ?? `HTTP ${response.status}`;
-    throw new Error(`MSG91 refused the WhatsApp message: ${typeof detail === "string" ? detail : JSON.stringify(detail)}`);
+  let languageCode = options.languageCode ?? templateLanguageCode(lang);
+  let waMessageId: string | undefined;
+  for (let attempt = 0; waMessageId === undefined; attempt++) {
+    try {
+      waMessageId = await postOnce(payloadFor(languageCode));
+    } catch (error) {
+      if (!(error instanceof WhatsAppSendError)) throw error;
+      const otherLanguage = templateLanguageCode(fallbackLang);
+      if (
+        error.code === MISSING_TRANSLATION &&
+        !options.languageCode &&
+        languageCode !== otherLanguage
+      ) {
+        console.warn(
+          `[WhatsApp] "${options.template}" has no ${languageCode} copy; sending ${otherLanguage}.`
+        );
+        languageCode = otherLanguage;
+        continue;
+      }
+      const delay = RETRY_DELAYS_MS[attempt];
+      if (!error.retryable || delay === undefined) throw error;
+      console.warn(`[WhatsApp] ${error.message} — retrying in ${delay} ms`);
+      await sleep(delay);
+    }
   }
 
   await recordUsage({ ...options.usage, costUsd: UTILITY_COST_USD });
+  return { waMessageId };
 }
