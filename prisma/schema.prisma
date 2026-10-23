@@ -876,3 +876,75 @@ model WhatsAppInbound {
   @@index([from])
   @@map("whatsapp_inbound")
 }
+
+/// One message an admin sent to many devotees at once from Send messages
+/// (/admin/messages): which template, filled how, to whom (the recipients are
+/// `WhatsAppBroadcastRecipient`s), and how far it has got.
+///
+/// Sent by `runBroadcast` (src/lib/broadcasts.ts) inside the API process, one
+/// recipient at a time. A restart picks up every broadcast still "sending"
+/// (`resumeBroadcasts`, called at start-up).
+model WhatsAppBroadcast {
+  id       String @id @default(auto()) @map("_id") @db.ObjectId
+  template String
+  /// The template language code it goes out in, e.g. "en", "gu".
+  language String
+  /// Meta's category when sent: "UTILITY" | "MARKETING". Decides the price.
+  category String
+  /// The template's body as Meta had it, with {{1}}… still in, for showing later.
+  bodyText String
+  /// What fills each {{n}}, in order: `VariableSpec[]` in src/lib/broadcasts.ts.
+  variables Json
+  /// The filters that chose the recipients, as words ("Mandal: Surat · …").
+  summary   String
+
+  /// "sending" | "paused" | "done" | "cancelled". Paused when sending keeps
+  /// failing or the token stops working; an admin resumes it.
+  status      String  @default("sending")
+  pauseReason String?
+
+  /// Recipients, after numbers were checked and duplicates removed.
+  total    Int
+  accepted Int @default(0)
+  failed   Int @default(0)
+  /// People picked but not messaged, by reason: `{ noNumber, duplicate, invalid }`.
+  skipped  Json
+
+  createdById   String    @db.ObjectId
+  createdByName String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  finishedAt    DateTime?
+
+  @@index([createdAt])
+  @@index([status])
+  @@map("whatsapp_broadcast")
+}
+
+/// One number a broadcast goes to. Its own document, so sending one can be
+/// claimed (`pending` → `sending`) and recorded without rewriting the rest.
+/// Delivery after Meta accepted it is on `WhatsAppMessage`, by `waMessageId`.
+model WhatsAppBroadcastRecipient {
+  id          String @id @default(auto()) @map("_id") @db.ObjectId
+  broadcastId String @db.ObjectId
+  /// Send order: the order the people were picked in.
+  order       Int
+  /// Country code and number, digits only.
+  to          String
+  /// Who it is for: the first person picked with this number.
+  name        String
+  registrationId String @db.ObjectId
+  memberId       String
+  /// The values for {{1}}, {{2}}… for this person, as sent.
+  values      String[]
+
+  /// "pending" | "sending" | "accepted" | "failed".
+  status       String  @default("pending")
+  waMessageId  String?
+  errorCode    Int?
+  errorMessage String?
+  sentAt       DateTime?
+
+  @@index([broadcastId, status, order])
+  @@map("whatsapp_broadcast_recipient")
+}

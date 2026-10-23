@@ -23,11 +23,20 @@ import { logSentMessage } from "./whatsapp-log";
 const TIMEOUT_MS = 10_000;
 
 /**
- * Meta's India rate for a utility or authentication template, ₹0.115 before
- * GST, in USD for the usage ledger. Approximate on purpose: the ledger is for
- * spotting spend, and the exact figure is on Meta's invoice.
+ * Meta's India rate per template message, by category, in rupees before 18%
+ * GST. Approximate on purpose: it is for estimates and the usage ledger, and
+ * the exact figure is on Meta's invoice. Served to the Send messages screen,
+ * which shows what a send will cost before it starts.
  */
-const UTILITY_COST_USD = 0.0014;
+export const WHATSAPP_PRICE_INR: Record<string, number> = {
+  AUTHENTICATION: 0.115,
+  UTILITY: 0.115,
+  MARKETING: 0.86,
+};
+/** Rupees to US dollars, for the usage ledger, which is kept in dollars. */
+const INR_PER_USD = 84;
+export const priceUsd = (category = "UTILITY") =>
+  (WHATSAPP_PRICE_INR[category] ?? WHATSAPP_PRICE_INR.UTILITY) / INR_PER_USD;
 
 /**
  * Waits between attempts when Meta says "not now". Short, because the OTP
@@ -175,7 +184,12 @@ async function postOnce(payload: object): Promise<string> {
   } catch (error) {
     // A timeout or a dropped connection. Retrying can deliver twice if Meta
     // did accept it; for a code or an invite a duplicate beats nothing.
-    throw new WhatsAppSendError(`Could not reach Meta: ${(error as Error).message}`, 0, undefined, true);
+    throw new WhatsAppSendError(
+      `Could not reach Meta: ${(error as Error).message}`,
+      0,
+      undefined,
+      true
+    );
   }
 
   // A non-JSON body (a gateway error page) is a failure too.
@@ -215,6 +229,8 @@ export async function sendWhatsAppTemplate(options: {
   buttonUrl?: string;
   /** Usage-ledger attribution. */
   usage: { endpoint: string; userId?: string };
+  /** Meta's category of the template, for the price in the ledger. Utility when left out. */
+  category?: string;
 }): Promise<{ waMessageId: string }> {
   if (!isWhatsAppConfigured()) throw new WhatsAppUnavailableError();
 
@@ -260,7 +276,7 @@ export async function sendWhatsAppTemplate(options: {
   }
 
   await Promise.all([
-    recordUsage({ ...options.usage, costUsd: UTILITY_COST_USD }),
+    recordUsage({ ...options.usage, costUsd: priceUsd(options.category) }),
     logSentMessage({
       waMessageId,
       to,
@@ -270,4 +286,64 @@ export async function sendWhatsAppTemplate(options: {
     }),
   ]);
   return { waMessageId };
+}
+
+/** A message template as Meta lists it, as much of it as we read. */
+export type MetaTemplate = {
+  id: string;
+  name: string;
+  status: string;
+  category: string;
+  language: string;
+  parameter_format?: string;
+  components: {
+    type: string;
+    format?: string;
+    text?: string;
+    buttons?: { type: string; text?: string; url?: string }[];
+  }[];
+};
+
+/**
+ * Every message template on our WhatsApp Business Account (WA_WABA_ID), one
+ * entry per language, whatever its status. Throws `WhatsAppUnavailableError`
+ * without the account id or token, and `WhatsAppSendError` when Meta refuses.
+ */
+export async function listMessageTemplates(): Promise<MetaTemplate[]> {
+  const waba = process.env.WA_WABA_ID;
+  if (!isWhatsAppConfigured() || !isSet(waba)) throw new WhatsAppUnavailableError();
+  const version = process.env.WA_GRAPH_VERSION || "v25.0";
+  const templates: MetaTemplate[] = [];
+  let url: string | undefined =
+    `https://graph.facebook.com/${version}/${waba}/message_templates?` +
+    new URLSearchParams({
+      fields: "id,name,status,category,language,parameter_format,components",
+      limit: "100",
+    });
+  // Paged; a handful of pages at most for any account this app will have.
+  for (let page = 0; url && page < 10; page++) {
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers: { Authorization: `Bearer ${process.env.WA_ACCESS_TOKEN}` },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+    } catch (error) {
+      throw new WhatsAppSendError(
+        `Could not reach Meta: ${(error as Error).message}`,
+        0,
+        undefined,
+        true
+      );
+    }
+    const result = (await response.json().catch(() => null)) as {
+      data?: MetaTemplate[];
+      paging?: { next?: string };
+      error?: GraphError;
+    } | null;
+    if (!response.ok || !result?.data) throw toSendError(response.status, result?.error);
+    templates.push(...result.data);
+    url = result.paging?.next;
+  }
+  return templates;
 }

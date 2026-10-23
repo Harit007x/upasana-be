@@ -12,6 +12,7 @@ import { prisma } from "./utils/db";
 import { errorHandler } from "./middlewares/errorHandler";
 import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./utils/swagger";
+import { resumeBroadcasts } from "./lib/broadcasts";
 
 const app = express();
 
@@ -73,6 +74,10 @@ async function startServer() {
 
     server.listen(PORT, () => {
       console.log(`✅ HTTP server running on http://localhost:${PORT}`);
+      // Sends from Send messages that a restart interrupted.
+      resumeBroadcasts().catch(error =>
+        console.error("[Broadcast] Could not resume sends:", error)
+      );
     });
 
     const shutdown = async () => {
