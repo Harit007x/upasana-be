@@ -25,8 +25,8 @@ export const EVENT_DAYS = ["2027-01-29", "2027-01-30", "2027-01-31", "2027-02-01
 
 /** Days a guest may arrive: the day before the event, and the event days. Mirrors the frontend. */
 export const ARRIVAL_DATES = ["2027-01-28", ...EVENT_DAYS] as const;
-/** Days a guest may leave: the event days only. */
-export const DEPARTURE_DATES = EVENT_DAYS;
+/** Days a guest may leave: the same as arriving, the day before included. Mirrors the frontend. */
+export const DEPARTURE_DATES = ARRIVAL_DATES;
 /** Every day a guest can be here, first to last. */
 export const STAY_DATES = ARRIVAL_DATES;
 
@@ -183,6 +183,19 @@ export const TRAVEL_MODES = [
   // Set on registrations whose mandal stopped being local before they gave
   // travel details; never picked, so the next edit has to choose a mode.
   "not_filled",
+  // Set when the party does not all travel the same way (2026-10-25): each
+  // person's own mode and journey are on `members[].travel`. Never picked.
+  "separate",
+] as const;
+
+/** The modes a person can pick for themselves: none of the ones set by the form. */
+export const PERSON_TRAVEL_MODES = [
+  "personal_vehicle",
+  "mandal_bus",
+  "train",
+  "flight",
+  "public_bus",
+  "other",
 ] as const;
 /**
  * "confirmed" is every registration that is neither checked in nor cancelled,

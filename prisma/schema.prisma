@@ -403,6 +403,12 @@ type RegistrationMember {
   /// its members. Null on registrations from before it existed: read it as
   /// the registration's `accommodationRequired` (see `wantsBed`).
   needsAccommodation Boolean?
+  /// How this person comes and goes, only when the party does not all travel
+  /// the same way (the registration's `travel.mode` is then "separate").
+  /// Null otherwise: everyone travels as `Registration.travel` says. Vehicles
+  /// are never on it — the party's vehicles stay on the registration, since a
+  /// parking pass is per car, not per person in it.
+  travel             Travel?
 }
 
 /// A calendar day at the venue ("2027-01-29") and a rough time of day.
@@ -438,7 +444,9 @@ type IndiaFlight {
 }
 
 type Travel {
-  /// "personal_vehicle" | "mandal_bus" | "train" | "flight" | "public_bus" | "other"
+  /// "personal_vehicle" | "mandal_bus" | "train" | "flight" | "public_bus" |
+  /// "other"; on a registration also "local", "not_filled", or "separate"
+  /// when each person's own is on `RegistrationMember.travel`.
   mode           String
   /// Personal vehicle only: how many, and their numbers for parking passes.
   /// The numbers are optional — the list can be shorter than the count, or
