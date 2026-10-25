@@ -314,6 +314,10 @@ model Registration {
   indiaTravel IndiaTravel?
 
   accommodationRequired Boolean
+  /// Arriving early for seva as a Swayam Sevak: the party's days may be any
+  /// in January or February 2027 (SEVA_DATES) rather than only around the
+  /// event. Optional so rows from before it was asked still read; null is no.
+  earlySeva             Boolean?
   notes                 String?
 
   /// "confirmed" (shown as "Registered") | "checked_in" | "cancelled".

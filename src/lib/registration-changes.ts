@@ -11,9 +11,9 @@ import { toRegistrationDto } from "./registrations";
 
 /** The details a form edit can change, in the shape the frontend reads. */
 export function detailsOf(r: Registration) {
-  const { type, groupName, mandal, members, arrival, departure, travel, indiaTravel, accommodationRequired, notes } =
+  const { type, groupName, mandal, members, arrival, departure, travel, indiaTravel, accommodationRequired, earlySeva, notes } =
     toRegistrationDto(r);
-  return { type, groupName, mandal, members, arrival, departure, travel, indiaTravel, accommodationRequired, notes };
+  return { type, groupName, mandal, members, arrival, departure, travel, indiaTravel, accommodationRequired, earlySeva, notes };
 }
 
 /** JSON with object keys sorted, so two equal snapshots always compare equal. */

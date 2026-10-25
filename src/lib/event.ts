@@ -30,6 +30,24 @@ export const DEPARTURE_DATES = ARRIVAL_DATES;
 /** Every day a guest can be here, first to last. */
 export const STAY_DATES = ARRIVAL_DATES;
 
+/** "2027-01-01" … "2027-02-28": every calendar day from `first` to `last`. */
+function daysBetween(first: string, last: string) {
+  const days: string[] = [];
+  for (let d = new Date(`${first}T00:00:00Z`); d.toISOString().slice(0, 10) <= last; ) {
+    days.push(d.toISOString().slice(0, 10));
+    d = new Date(d.getTime() + 86_400_000);
+  }
+  return days as [string, ...string[]];
+}
+
+/**
+ * Days someone arriving early for seva as a Swayam Sevak (`earlySeva`) may
+ * arrive and leave: all of January and February 2027, the event's months.
+ * Everyone else is held to ARRIVAL_DATES / DEPARTURE_DATES. Mirrors SEVA_DATES
+ * on the frontend.
+ */
+export const SEVA_DATES = daysBetween("2027-01-01", "2027-02-28");
+
 /**
  * Nights someone can need a bed: every stay date but the last, since nobody
  * sleeps over after leaving. A night is named by its evening's date.

@@ -15,6 +15,7 @@ import {
   REGISTRATION_TYPES,
   ARRIVAL_DATES,
   DEPARTURE_DATES,
+  SEVA_DATES,
   TIME_SLOTS,
   TRAIN_STATIONS,
   TRAVEL_MODES,
@@ -39,15 +40,18 @@ import {
  * would refuse has to be refused here too.
  */
 
-const stayPoint = (dates: readonly [string, ...string[]], error: string) =>
-  z.object({
-    date: z.enum(dates, { error }),
-    slot: z.enum(TIME_SLOTS, { error: "Pick a time of day" }),
-    // Whether they take the meal served then: breakfast, lunch or dinner.
-    meal: z.boolean({ error: "Say whether you will take the meal" }),
-  });
-const arrivalPoint = stayPoint(ARRIVAL_DATES, "Pick an arrival day between 28 January and 1 February");
-const departurePoint = stayPoint(DEPARTURE_DATES, "Pick a departure day between 28 January and 1 February");
+// Any day a Swayam Sevak may pick. Whether this registration may use the days
+// outside the event's own is decided by `earlySeva`, in superRefine.
+const stayPoint = z.object({
+  date: z.enum(SEVA_DATES, { error: "Pick a day in January or February 2027" }),
+  slot: z.enum(TIME_SLOTS, { error: "Pick a time of day" }),
+  // Whether they take the meal served then: breakfast, lunch or dinner.
+  meal: z.boolean({ error: "Say whether you will take the meal" }),
+});
+const arrivalPoint = stayPoint;
+const departurePoint = stayPoint;
+const ARRIVAL_DAYS: readonly string[] = ARRIVAL_DATES;
+const DEPARTURE_DAYS: readonly string[] = DEPARTURE_DATES;
 
 const text = (max: number) => z.string().trim().max(max);
 
@@ -235,6 +239,12 @@ export const newRegistrationSchema = z
     }),
     indiaTravel,
     accommodationRequired: z.boolean(),
+    /**
+     * Arriving early for seva as a Swayam Sevak: the party may arrive and
+     * leave on any day of January or February 2027 (SEVA_DATES), not only
+     * around the event. Optional; absent is no.
+     */
+    earlySeva: z.boolean().optional(),
     notes: optionalText(1000),
     /**
      * From POST /otp/verify: proof the primary contact's number was verified.
@@ -290,6 +300,21 @@ export const newRegistrationSchema = z
         issue(["members", index, "departure"], "Departure has to be after arrival");
       }
     });
+    // Only a Swayam Sevak coming early may use the days outside the event's.
+    if (!value.earlySeva) {
+      const points = [
+        { path: [] as (string | number)[], arrival: value.arrival, departure: value.departure },
+        ...value.members.map((m, index) => ({ path: ["members", index], ...m })),
+      ];
+      for (const { path, arrival, departure } of points) {
+        if (!ARRIVAL_DAYS.includes(arrival.date)) {
+          issue([...path, "arrival", "date"], "Pick an arrival day between 28 January and 1 February");
+        }
+        if (!DEPARTURE_DAYS.includes(departure.date)) {
+          issue([...path, "departure", "date"], "Pick a departure day between 28 January and 1 February");
+        }
+      }
+    }
     // A family is looked after by an adult; someone registering alone may be younger.
     if (value.type === "family" && (value.members[0]?.age ?? 0) < MIN_FAMILY_CONTACT_AGE) {
       issue(
@@ -515,6 +540,7 @@ export function toCreateData(input: NewRegistrationInput, existingIds: readonly 
     // True when anyone in the party has a bed coming; each person's own
     // answer is on them.
     accommodationRequired: members.some(m => m.needsAccommodation),
+    earlySeva: input.earlySeva ?? false,
     indiaTravel: indiaTravelRecord(input),
     notes: input.notes,
   };
@@ -620,6 +646,9 @@ export function toRegistrationDto(r: Registration) {
       departure: r.indiaTravel.departure ? compact({ ...r.indiaTravel.departure }) : undefined,
     },
     accommodationRequired: r.accommodationRequired,
+    // Always a boolean, so an old row (null) and an unticked save read the
+    // same and editing one does not log a change nobody made.
+    earlySeva: r.earlySeva === true,
     notes: r.notes,
     status: statusOf(r.status),
     source: r.source,

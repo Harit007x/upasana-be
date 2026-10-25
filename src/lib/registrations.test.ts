@@ -255,3 +255,49 @@ describe("travelling separately", () => {
     expect(messagesAt(input, "travel.mode")).toEqual(["Select how you are travelling"]);
   });
 });
+
+describe("arriving early for seva", () => {
+  const early = { date: "2027-01-10", slot: "morning", meal: true };
+  const late = { date: "2027-02-20", slot: "evening", meal: true };
+  const withDays = (overrides: object = {}) =>
+    registration({
+      members: [
+        person("Ramesh Patel", {
+          isPrimary: true,
+          mobile: "+919876543210",
+          arrival: early,
+          departure: late,
+        }),
+      ],
+      arrival: early,
+      departure: late,
+      ...overrides,
+    });
+
+  it("refuses days outside the event without it", () => {
+    expect(messagesAt(withDays(), "arrival.date")).toEqual([
+      "Pick an arrival day between 28 January and 1 February",
+    ]);
+    expect(messagesAt(withDays(), "members.0.departure.date")).toEqual([
+      "Pick a departure day between 28 January and 1 February",
+    ]);
+  });
+
+  it("accepts any day of January or February 2027 with it, and stores it", () => {
+    const input = withDays({ earlySeva: true });
+    expect(newRegistrationSchema.safeParse(input).success).toBe(true);
+    expect(toCreateData(newRegistrationSchema.parse(input)).earlySeva).toBe(true);
+  });
+
+  it("still refuses a day outside those two months", () => {
+    const input = withDays({
+      earlySeva: true,
+      arrival: { ...early, date: "2026-12-31" },
+    });
+    expect(messagesAt(input, "arrival.date")).toEqual(["Pick a day in January or February 2027"]);
+  });
+
+  it("is stored as no when not sent", () => {
+    expect(toCreateData(newRegistrationSchema.parse(registration())).earlySeva).toBe(false);
+  });
+});
