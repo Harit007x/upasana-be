@@ -310,13 +310,17 @@ model Registration {
   arrival     StayPoint
   departure   StayPoint
   travel      Travel
-  /// Devotees from abroad only, when they filled any of it in.
+  /// Devotees from abroad only, when they filled any of it in. When the party
+  /// does not all land and fly out on the same days, each person's flights are
+  /// on `RegistrationMember.indiaTravel` and this only says whether anyone
+  /// needs a pickup (no flights on it). Read a person's through `flightsOf`.
   indiaTravel IndiaTravel?
 
   accommodationRequired Boolean
-  /// Arriving early for seva as a Swayam Sevak: the party's days may be any
-  /// in January or February 2027 (SEVA_DATES) rather than only around the
-  /// event. Optional so rows from before it was asked still read; null is no.
+  /// True when anyone in the party is arriving early for seva as a Swayam
+  /// Sevak; each person's own answer is `RegistrationMember.earlySeva`. It was
+  /// first asked once for the whole party, so where a member's is null this
+  /// answers for them (`isSevak`). Optional so older rows still read.
   earlySeva             Boolean?
   notes                 String?
 
@@ -407,12 +411,21 @@ type RegistrationMember {
   /// its members. Null on registrations from before it existed: read it as
   /// the registration's `accommodationRequired` (see `wantsBed`).
   needsAccommodation Boolean?
+  /// Arriving early for seva as a Swayam Sevak: this person's days may be any
+  /// in January or February 2027 (SEVA_DATES), not only around the event.
+  /// Null on rows saved before it was asked per person: the registration's
+  /// `earlySeva` then answers for everyone (`isSevak`).
+  earlySeva          Boolean?
   /// How this person comes and goes, only when the party does not all travel
   /// the same way (the registration's `travel.mode` is then "separate").
   /// Null otherwise: everyone travels as `Registration.travel` says. Vehicles
   /// are never on it — the party's vehicles stay on the registration, since a
   /// parking pass is per car, not per person in it.
   travel             Travel?
+  /// From abroad, when the party does not all land and fly out on the same
+  /// days: this person's Ahmedabad airport pickup and flight out. Null
+  /// otherwise: the registration's `indiaTravel` is everyone's (`flightsOf`).
+  indiaTravel        IndiaTravel?
 }
 
 /// A calendar day at the venue ("2027-01-29") and a rough time of day.
@@ -428,7 +441,7 @@ type StayPoint {
 
 /// For devotees from abroad: a pickup from and a drop to Ahmedabad airport,
 /// the only airport the transport team covers. Asked, optionally, on the
-/// first step when the mandal is overseas.
+/// people step when the mandal is overseas — once for the party, or per person.
 type IndiaTravel {
   needsPickup Boolean
   /// The flight they land on; with `needsPickup`.

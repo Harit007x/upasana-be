@@ -65,6 +65,9 @@ export const WHATSAPP_TEMPLATES = {
   teamInvite: () => process.env.WA_TEMPLATE_INVITE || "team_invite",
   /** An Authentication-category template: the code in the body and on its copy-code button. */
   otp: () => process.env.WA_TEMPLATE_OTP || "anoopam_otp",
+  /** {{1}} contact's first name, {{2}} registration code, {{3}} people, {{4}} stay. Utility, en + gu. */
+  registrationConfirmation: () =>
+    process.env.WA_TEMPLATE_REGISTRATION || "registration_confirmation",
   /** {{1}} contact's name, {{2}} event, {{3}} where everyone stays, on one line. Paused feature. */
   stayDetails: () => process.env.WA_TEMPLATE_ROOM_DETAILS || "room_details",
 };

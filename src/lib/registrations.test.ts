@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { MOBILE_E164 } from "./event";
 import {
   hasNonLatinLetters,
+  isSevak,
   newRegistrationSchema,
   splitFullName,
   toCreateData,
@@ -259,45 +260,121 @@ describe("travelling separately", () => {
 describe("arriving early for seva", () => {
   const early = { date: "2027-01-10", slot: "morning", meal: true };
   const late = { date: "2027-02-20", slot: "evening", meal: true };
-  const withDays = (overrides: object = {}) =>
+  const contact = (extra: object = {}) =>
+    person("Ramesh Patel", { isPrimary: true, mobile: "+919876543210", ...extra });
+  const alone = (extra: object = {}) =>
     registration({
+      members: [contact({ arrival: early, departure: late, ...extra })],
+      arrival: early,
+      departure: late,
+    });
+  /** A family whose contact comes early for seva, and a wife who comes for the event. */
+  const family = (wifeExtra: object = {}) =>
+    registration({
+      type: "family",
+      groupName: "Patel family",
       members: [
-        person("Ramesh Patel", {
-          isPrimary: true,
-          mobile: "+919876543210",
-          arrival: early,
-          departure: late,
-        }),
+        contact({ arrival: early, departure: late, earlySeva: true }),
+        person("Sita Ramesh Patel", { gender: "female", relation: "Spouse", ...wifeExtra }),
       ],
       arrival: early,
       departure: late,
-      ...overrides,
     });
 
-  it("refuses days outside the event without it", () => {
-    expect(messagesAt(withDays(), "arrival.date")).toEqual([
+  it("refuses days outside the event for someone who is not one", () => {
+    expect(messagesAt(alone(), "arrival.date")).toEqual([
       "Pick an arrival day between 28 January and 1 February",
     ]);
-    expect(messagesAt(withDays(), "members.0.departure.date")).toEqual([
+    expect(messagesAt(alone(), "members.0.departure.date")).toEqual([
       "Pick a departure day between 28 January and 1 February",
     ]);
   });
 
-  it("accepts any day of January or February 2027 with it, and stores it", () => {
-    const input = withDays({ earlySeva: true });
+  it("accepts any day of January or February 2027 for a Swayam Sevak, and stores it", () => {
+    const input = alone({ earlySeva: true });
     expect(newRegistrationSchema.safeParse(input).success).toBe(true);
-    expect(toCreateData(newRegistrationSchema.parse(input)).earlySeva).toBe(true);
+    const data = toCreateData(newRegistrationSchema.parse(input));
+    expect(data.members[0].earlySeva).toBe(true);
+    expect(data.earlySeva).toBe(true);
+  });
+
+  it("lets one person in a family come early while another comes for the event", () => {
+    const input = family();
+    expect(newRegistrationSchema.safeParse(input).success).toBe(true);
+    const data = toCreateData(newRegistrationSchema.parse(input));
+    expect(data.members.map(m => m.earlySeva)).toEqual([true, false]);
+    expect(data.earlySeva).toBe(true);
+  });
+
+  it("holds the others in a family to the event's days", () => {
+    const input = family({ arrival: early });
+    expect(messagesAt(input, "members.1.arrival.date")).toEqual([
+      "Pick an arrival day between 28 January and 1 February",
+    ]);
+    expect(messagesAt(input, "members.0.arrival.date")).toEqual([]);
   });
 
   it("still refuses a day outside those two months", () => {
-    const input = withDays({
-      earlySeva: true,
-      arrival: { ...early, date: "2026-12-31" },
-    });
-    expect(messagesAt(input, "arrival.date")).toEqual(["Pick a day in January or February 2027"]);
+    const input = alone({ earlySeva: true, arrival: { ...early, date: "2026-12-31" } });
+    expect(messagesAt(input, "members.0.arrival.date")).toEqual([
+      "Pick a day in January or February 2027",
+    ]);
   });
 
   it("is stored as no when not sent", () => {
-    expect(toCreateData(newRegistrationSchema.parse(registration())).earlySeva).toBe(false);
+    const data = toCreateData(newRegistrationSchema.parse(registration()));
+    expect(data.earlySeva).toBe(false);
+    expect(data.members[0].earlySeva).toBe(false);
+  });
+
+  it("reads a party-wide answer from before it was asked per person as everyone's", () => {
+    expect(isSevak({ earlySeva: true }, { earlySeva: null })).toBe(true);
+    expect(isSevak({ earlySeva: true }, { earlySeva: false })).toBe(false);
+    expect(isSevak({ earlySeva: null }, {})).toBe(false);
+  });
+});
+
+describe("airport flights per person", () => {
+  const land = (date: string) => ({ needsPickup: true, arrival: { date, flight: "ai 144" }, needsDrop: false });
+  const usa = (members: object[], extra: object = {}) =>
+    registration({
+      type: "family",
+      groupName: "Patel family",
+      mandal: "USA",
+      members: [
+        person("Ramesh Patel", { isPrimary: true, mobile: "+919876543210", ...members[0] }),
+        person("Sita Ramesh Patel", { gender: "female", relation: "Spouse", ...members[1] }),
+      ],
+      ...extra,
+    });
+
+  it("keeps the party's flights when they share them", () => {
+    const data = toCreateData(newRegistrationSchema.parse(usa([{}, {}], { indiaTravel: land("2027-01-27") })));
+    expect(data.indiaTravel?.arrival?.date).toBe("2027-01-27");
+    expect(data.members.every(m => m.indiaTravel === null)).toBe(true);
+  });
+
+  it("stores each person's own flights, and only whether anyone needs a pickup on the party", () => {
+    const data = toCreateData(
+      newRegistrationSchema.parse(usa([{ indiaTravel: land("2027-01-25") }, {}]))
+    );
+    expect(data.members[0].indiaTravel?.arrival).toEqual({ date: "2027-01-25", time: null, flight: "AI 144" });
+    expect(data.members[1].indiaTravel).toBeNull();
+    expect(data.indiaTravel).toEqual({ needsPickup: true, arrival: null, needsDrop: false, departure: null });
+  });
+
+  it("checks each person's landing against their own arrival", () => {
+    // Arrives 29 Jan (the fixture's day); landing on the 30th is too late.
+    const input = usa([{}, { indiaTravel: land("2027-01-30") }]);
+    expect(messagesAt(input, "members.1.indiaTravel.arrival.date")).toEqual([
+      "Has to be on or before you reach the event",
+    ]);
+  });
+
+  it("drops flights for a mandal in India", () => {
+    const input = usa([{ indiaTravel: land("2027-01-25") }, {}], { mandal: "Surat", travel: { mode: "train", needsPickup: false } });
+    const data = toCreateData(newRegistrationSchema.parse(input));
+    expect(data.indiaTravel).toBeNull();
+    expect(data.members[0].indiaTravel).toBeNull();
   });
 });

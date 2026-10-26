@@ -40,8 +40,8 @@ import {
  * would refuse has to be refused here too.
  */
 
-// Any day a Swayam Sevak may pick. Whether this registration may use the days
-// outside the event's own is decided by `earlySeva`, in superRefine.
+// Any day a Swayam Sevak may pick. Whether a person may use the days outside
+// the event's own is decided by their `earlySeva`, in superRefine.
 const stayPoint = z.object({
   date: z.enum(SEVA_DATES, { error: "Pick a day in January or February 2027" }),
   slot: z.enum(TIME_SLOTS, { error: "Pick a time of day" }),
@@ -205,8 +205,20 @@ const member = z.preprocess(
     needsAccommodation: z.boolean().optional(),
     /** Aged YOUTH_MAX_AGE or under: whether they will attend the Youth Convention. Optional. */
     attendsYouthConvention: z.boolean().optional(),
+    /**
+     * Arriving early for seva as a Swayam Sevak: this person may arrive and
+     * leave on any day of January or February 2027 (SEVA_DATES), not only
+     * around the event. Optional; absent is no.
+     */
+    earlySeva: z.boolean().optional(),
     /** Only when the registration's travel mode is "separate": how this person travels. */
     travel: personTravel.optional(),
+    /**
+     * From abroad, only when the party does not all land and fly out on the
+     * same days: this person's airport pickup and flight out. Sent for anyone
+     * in such a party, so its presence on any member is what splits it.
+     */
+    indiaTravel,
   })
 );
 
@@ -239,12 +251,6 @@ export const newRegistrationSchema = z
     }),
     indiaTravel,
     accommodationRequired: z.boolean(),
-    /**
-     * Arriving early for seva as a Swayam Sevak: the party may arrive and
-     * leave on any day of January or February 2027 (SEVA_DATES), not only
-     * around the event. Optional; absent is no.
-     */
-    earlySeva: z.boolean().optional(),
     notes: optionalText(1000),
     /**
      * From POST /otp/verify: proof the primary contact's number was verified.
@@ -300,11 +306,17 @@ export const newRegistrationSchema = z
         issue(["members", index, "departure"], "Departure has to be after arrival");
       }
     });
-    // Only a Swayam Sevak coming early may use the days outside the event's.
-    if (!value.earlySeva) {
+    // Only a Swayam Sevak coming early may use the days outside the event's:
+    // each person by their own answer, and the party's span (first in, last
+    // out) unless someone in it is one.
+    {
       const points = [
-        { path: [] as (string | number)[], arrival: value.arrival, departure: value.departure },
-        ...value.members.map((m, index) => ({ path: ["members", index], ...m })),
+        ...value.members
+          .map((m, index) => ({ path: ["members", index], ...m }))
+          .filter(m => !m.earlySeva),
+        ...(value.members.some(m => m.earlySeva)
+          ? []
+          : [{ path: [] as (string | number)[], arrival: value.arrival, departure: value.departure }]),
       ];
       for (const { path, arrival, departure } of points) {
         if (!ARRIVAL_DAYS.includes(arrival.date)) {
@@ -369,15 +381,21 @@ export const newRegistrationSchema = z
         seenPlates.add(normalizePlate(plate));
       });
     }
-    // Landing in India before reaching the event, leaving after it ends.
-    const landing = value.indiaTravel?.arrival?.date;
-    const leaving = value.indiaTravel?.departure?.date;
-    if (landing && landing > value.arrival.date) {
-      issue(["indiaTravel", "arrival", "date"], "Has to be on or before you reach the event");
-    }
-    if (leaving && leaving < value.departure.date) {
-      issue(["indiaTravel", "departure", "date"], "Has to be on or after you leave the event");
-    }
+    // Landing in India before reaching the event, leaving after it ends —
+    // each person by their own flights, or the party's when they share them.
+    const ownFlights = value.members.some(m => m.indiaTravel);
+    value.members.forEach((m, index) => {
+      const path = ownFlights ? ["members", index, "indiaTravel"] : ["indiaTravel"];
+      const flights = ownFlights ? m.indiaTravel : value.indiaTravel;
+      const landing = flights?.needsPickup ? flights.arrival?.date : undefined;
+      const leaving = flights?.departure?.date;
+      if (landing && landing > m.arrival.date) {
+        issue([...path, "arrival", "date"], "Has to be on or before you reach the event");
+      }
+      if (leaving && leaving < m.departure.date) {
+        issue([...path, "departure", "date"], "Has to be on or after you leave the event");
+      }
+    });
     if (value.travel.vehicleNumbers.length > (value.travel.vehicleCount ?? 1)) {
       issue(["travel", "vehicleNumbers"], "More vehicle numbers than vehicles");
     }
@@ -466,6 +484,9 @@ function memberIds(input: NewRegistrationInput, existingIds: readonly string[]) 
  */
 export function toCreateData(input: NewRegistrationInput, existingIds: readonly string[] = []) {
   const ids = memberIds(input, existingIds);
+  // From abroad, the party may not all land and fly out on the same days.
+  const overseas = OVERSEAS_MANDALS.includes(input.mandal);
+  const ownFlights = overseas && input.members.some(m => m.indiaTravel);
   // A nearby mandal travels from home and sleeps there: no travel, no beds.
   const local = isLocalMandal(input.mandal);
   // Each person's own travel is kept only while the party travels separately.
@@ -478,12 +499,14 @@ export function toCreateData(input: NewRegistrationInput, existingIds: readonly 
     relation: input.type === "family" && index > 0 ? m.relation : null,
     assistanceNote: m.needsAssistance ? m.assistanceNote : null,
     attendsYouthConvention: m.age <= YOUTH_MAX_AGE ? (m.attendsYouthConvention ?? null) : null,
+    earlySeva: m.earlySeva ?? false,
     // Someone who leaves the day they arrive has no night here, so no bed.
     needsAccommodation:
       !local &&
       (m.needsAccommodation ?? input.accommodationRequired) &&
       m.departure.date > m.arrival.date,
     travel: separate && m.travel ? { ...journeyRecord(m.travel), vehicleCount: null, vehicleNumbers: [] } : null,
+    indiaTravel: ownFlights ? indiaTravelRecord(m.indiaTravel) : null,
   }));
   const drivers = separate
     ? members.filter(m => m.travel?.mode === "personal_vehicle").length
@@ -540,8 +563,21 @@ export function toCreateData(input: NewRegistrationInput, existingIds: readonly 
     // True when anyone in the party has a bed coming; each person's own
     // answer is on them.
     accommodationRequired: members.some(m => m.needsAccommodation),
-    earlySeva: input.earlySeva ?? false,
-    indiaTravel: indiaTravelRecord(input),
+    // True when anyone is; each person's own answer is on them.
+    earlySeva: members.some(m => m.earlySeva),
+    // Split: only whether anyone needs a pickup; the flights are on each person.
+    indiaTravel: !overseas
+      ? null
+      : ownFlights
+        ? members.some(m => m.indiaTravel)
+          ? {
+              needsPickup: members.some(m => m.indiaTravel?.needsPickup),
+              arrival: null,
+              needsDrop: false,
+              departure: null,
+            }
+          : null
+        : indiaTravelRecord(input.indiaTravel),
     notes: input.notes,
   };
 }
@@ -579,12 +615,11 @@ function journeyHome(travel: Omit<Journey, "mode"> & { mode: string }) {
 }
 
 /**
- * The Ahmedabad airport pickup and flight out as stored: only for an overseas
- * mandal that asked for a pickup or gave its flight out.
+ * The Ahmedabad airport pickup and flight out as stored, the party's or one
+ * person's: only when a pickup was asked for or the flight out given.
  */
-function indiaTravelRecord(input: NewRegistrationInput) {
-  const india = input.indiaTravel;
-  if (!india || !OVERSEAS_MANDALS.includes(input.mandal)) return null;
+function indiaTravelRecord(india: NewRegistrationInput["indiaTravel"]) {
+  if (!india) return null;
   if (!india.needsPickup && !india.departure) return null;
   type Leg = NonNullable<typeof india.arrival>;
   const leg = (f?: Leg) =>
@@ -596,6 +631,15 @@ function indiaTravelRecord(input: NewRegistrationInput) {
     arrival: india.needsPickup ? leg(india.arrival) : null,
     needsDrop: false,
     departure: leg(india.departure),
+  };
+}
+
+/** Stored airport flights in the shape the frontend reads. */
+function indiaTravelDto(india: NonNullable<Registration["indiaTravel"]>) {
+  return {
+    ...india,
+    arrival: india.arrival ? compact({ ...india.arrival }) : undefined,
+    departure: india.departure ? compact({ ...india.departure }) : undefined,
   };
 }
 
@@ -618,6 +662,18 @@ export function wantsBed(
   return registration.accommodationRequired && (member.needsAccommodation ?? true);
 }
 
+/**
+ * Whether this person is arriving early for seva as a Swayam Sevak. It was
+ * first asked once for the whole party; registrations saved then have no
+ * answer per person, and the registration's covers everyone.
+ */
+export function isSevak(
+  registration: Pick<Registration, "earlySeva">,
+  member: { earlySeva?: boolean | null }
+) {
+  return member.earlySeva ?? registration.earlySeva === true;
+}
+
 /** A stored registration in the shape the frontend reads. Internal fields stay behind. */
 export function toRegistrationDto(r: Registration) {
   return compact({
@@ -634,17 +690,15 @@ export function toRegistrationDto(r: Registration) {
         arrival: compact({ ...m.arrival }),
         departure: compact({ ...m.departure }),
         needsAccommodation: wantsBed(r, m),
+        earlySeva: isSevak(r, m),
         travel: m.travel ? compact({ ...m.travel }) : null,
+        indiaTravel: m.indiaTravel ? indiaTravelDto(m.indiaTravel) : null,
       })
     ),
     arrival: compact({ ...r.arrival }),
     departure: compact({ ...r.departure }),
     travel: compact({ ...r.travel }),
-    indiaTravel: r.indiaTravel && {
-      ...r.indiaTravel,
-      arrival: r.indiaTravel.arrival ? compact({ ...r.indiaTravel.arrival }) : undefined,
-      departure: r.indiaTravel.departure ? compact({ ...r.indiaTravel.departure }) : undefined,
-    },
+    indiaTravel: r.indiaTravel && indiaTravelDto(r.indiaTravel),
     accommodationRequired: r.accommodationRequired,
     // Always a boolean, so an old row (null) and an unticked save read the
     // same and editing one does not log a change nobody made.

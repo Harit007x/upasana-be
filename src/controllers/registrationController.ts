@@ -9,6 +9,7 @@ import { MOBILE_E164 } from "../lib/event";
 import { MOBILE_OTP_REQUIRED, consumeVerificationToken, peekVerificationToken } from "../lib/otp";
 import { takeNumbers, withCodes } from "../lib/registration-codes";
 import { recordChange } from "../lib/registration-changes";
+import { confirmationLang, sendRegistrationConfirmation } from "../lib/registration-confirmation";
 import {
   newRegistrationSchema,
   statusSchema,
@@ -177,6 +178,10 @@ const create = async (req: Request, res: Response): Promise<void> => {
   }
 
   res.status(201).json({ success: true, data: toRegistrationDto(registration) });
+  // After answering: a slow or refused WhatsApp send must not hold up, or
+  // fail, a registration that is already saved. `lang` is the language the
+  // form was shown in; the desk's screens are English.
+  void sendRegistrationConfirmation(registration, confirmationLang(req.body?.lang));
 };
 
 /**

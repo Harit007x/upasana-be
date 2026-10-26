@@ -23,7 +23,8 @@ const { create, list, getOne, lookup, taken, setStatus, update, mine, updateSelf
  *       Public: devotees register from the shared form without an account. A
  *       request carrying a staff session is recorded with `source: "staff"`,
  *       anything else as `"self"`. The server assigns the code, status and
- *       timestamps.
+ *       timestamps. Optional `lang` (`en` | `gu`) picks the language of the
+ *       WhatsApp confirmation sent to the contact once it is saved.
  *     tags: [Registrations]
  *     responses:
  *       201:

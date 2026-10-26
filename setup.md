@@ -151,6 +151,20 @@ If you create them as "English (US)", set `WA_LANG_CODE_EN=en_US`. A mismatch fa
 The button URL must be the real public domain (Meta refuses `localhost`), and a domain change means
 re-approval. Meta also refuses a body that starts or ends with a placeholder.
 
+*Registration confirmation* (Utility, **English and Gujarati**) — sent to the contact the moment a
+registration is saved, in the language the form was shown in:
+
+| Field | Value |
+| --- | --- |
+| Name | `registration_confirmation` (`WA_TEMPLATE_REGISTRATION`) |
+| Category | **Utility** |
+| Body (en) | `Jay Shree Swaminarayan {{1}}, your registration for the Dashabdi Mahotsav 2027 at Upasana Dham has been received.`<br><br>`Registration code: {{2}}`<br>`People: {{3}}`<br>`Stay: {{4}}`<br><br>`Please keep this code and show it at the registration desk when you arrive. To change any details, open the registration link again and choose "Change my registration".`<br>`– Anoopam Mission` |
+| Body (gu) | `જય શ્રી સ્વામિનારાયણ {{1}}, ઉપાસના ધામ ખાતે દશાબ્દી મહોત્સવ 2027 માટે આપની નોંધણી મળી ગઈ છે.`<br><br>`નોંધણી કોડ: {{2}}`<br>`વ્યક્તિઓ: {{3}}`<br>`રોકાણ: {{4}}`<br><br>`કૃપા કરીને આ કોડ સાચવી રાખો અને પહોંચો ત્યારે નોંધણી ડેસ્ક પર બતાવો. વિગતોમાં ફેરફાર કરવા માટે, નોંધણીની લિંક ફરી ખોલી "મારી નોંધણીમાં ફેરફાર કરો" પસંદ કરો.`<br>`– અનુપમ મિશન` |
+| Samples | `Harit`, `DM-F-0031`, `4`, `30 Jan, morning – 1 Feb, evening` (gu: `30 જાન્યુ, સવાર – 1 ફેબ્રુ, સાંજ`) |
+
+The four values must stay in that order — `confirmationValues` in `src/lib/registration-confirmation.ts`
+fills them. Every local registration against a configured `.env` sends one, and it is paid.
+
 *Room details* (`room_details`) belongs to the paused per-person allotment; what the stay message
 says is still to be decided, so do not create it yet.
 
